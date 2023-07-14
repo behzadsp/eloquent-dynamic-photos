@@ -2,6 +2,7 @@
     "name": "behzadsp/eloquent-dynamic-photos",
     "description": "A Laravel Eloquent trait for dynamically handling and managing photo storage with ease.",
     "license": "MIT",
+    "homepage": "https://github.com/behzadsp/eloquent-dynamic-photos",
     "keywords": [
         "behzadsp",
         "eloquent",

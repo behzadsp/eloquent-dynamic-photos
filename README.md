@@ -16,7 +16,7 @@ You can install the package via composer:
     
 You can publish the config file with:
 ```bash
-php artisan vendor:publish --provider="Behzadsp\EloquentDynamicPhotos\EloquentDynamicPhotosServiceProvider" --tag="config"
+php artisan vendor:publish --provider="Behzadsp\EloquentDynamicPhotos\Providers\EloquentDynamicPhotosServiceProvider"
 ```
 
 This is the contents of the published config file named `eloquent_photo.php`:
