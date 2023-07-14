@@ -5,7 +5,7 @@ namespace Behzadsp\EloquentDynamicPhotos\Traits;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
-use Intervention\Image\Image;
+use Intervention\Image\Facades\Image;
 
 trait HasPhotos
 {
