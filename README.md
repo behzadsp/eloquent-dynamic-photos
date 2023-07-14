@@ -19,7 +19,7 @@ You can publish the config file with:
 php artisan vendor:publish --provider="Behzadsp\EloquentDynamicPhotos\EloquentDynamicPhotosServiceProvider" --tag="config"
 ```
 
-This is the contents of the published config file:
+This is the contents of the published config file named `eloquent_photo.php`:
 
 ```php
 <?php

@@ -1,0 +1,40 @@
+{
+    "name": "behzadsp/eloquent-dynamic-photos",
+    "description": "A Laravel Eloquent trait for dynamically handling and managing photo storage with ease.",
+    "license": "MIT",
+    "keywords": [
+        "behzadsp",
+        "eloquent",
+        "dynamic",
+        "photo",
+        "image"
+    ],
+    "autoload": {
+        "psr-4": {
+            "Behzadsp\\EloquentDynamicPhotos\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Behzad Soltanpour"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "ext-gd": "*",
+        "illuminate/support": "^7.0|^8.0|^9.0|^10.0",
+        "illuminate/database": "^7.0|^8.0|^9.0|^10.0",
+        "nesbot/carbon": "^2.53",
+        "intervention/image": "^2.7"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Behzadsp\\EloquentDynamicPhotos\\Providers\\EloquentDynamicPhotosServiceProvider"
+            ]
+        }
+    }
+}
