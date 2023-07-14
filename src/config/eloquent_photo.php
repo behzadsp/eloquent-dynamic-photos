@@ -2,6 +2,7 @@
 
 return [
     'disk' => 'public',
+    'name_attribute' => 'slug',
     'root_directory' => 'images',
     'quality' => 50,
     'format' => 'webp',

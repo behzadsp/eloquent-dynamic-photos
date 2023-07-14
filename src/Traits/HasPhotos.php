@@ -50,11 +50,13 @@ trait HasPhotos
 
     public function getPhotoDirectoryPath()
     {
+        $nameAttribute = config('eloquent_photo.name_attribute');
+
         return config('eloquent_photo.root_directory') .
             '/' .
             $this->getDirName() .
             '/' .
-            str($this->slug)
+            str($this->$nameAttribute)
                 ->limit(config('eloquent_photo.slug_limit'))
                 ->toString() .
             '_' .
@@ -70,15 +72,20 @@ trait HasPhotos
             ->toString();
     }
 
-    public function __get($key)
+    public function __call($method, $parameters)
     {
-        if (str_starts_with($key, 'photo') && str_ends_with($key, 'url')) {
-            $photoField = str_replace('url', '', $key);
-            return $this->$photoField
-                ? Storage::disk(config('eloquent_photo.disk'))->url($this->$photoField)
-                : null;
+        if (str_starts_with($method, 'get') && str_contains($method, 'PhotoUrl') && str_ends_with($method, 'Attribute')) {
+
+            $photoField = str_replace(['get', 'UrlAttribute'], '', $method);
+
+            if (isset($this->attributes[$photoField])) {
+                return Storage::disk('public')->url($this->attributes[$photoField]);
+            }
+
+            return null;
         }
 
-        return parent::__get($key);
+        return parent::__call($method, $parameters);
     }
+
 }
