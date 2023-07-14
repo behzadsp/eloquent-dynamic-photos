@@ -38,14 +38,14 @@ return [
 
 ## Usage
 
-After installing the package, simply use the `HasPhoto` trait in your Eloquent models:
+After installing the package, simply use the `HasPhotos` trait in your Eloquent models:
 
 ```php
-use Behzadsp\EloquentDynamicPhotos\Traits\HasPhoto;
+use Behzadsp\EloquentDynamicPhotos\Traits\HasPhotos;
 
 class YourModel extends Model
 {
-    use HasPhoto;
+    use HasPhotos;
 
     // ...
 }
