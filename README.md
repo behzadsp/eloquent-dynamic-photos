@@ -5,7 +5,6 @@
 
 This is a Laravel Eloquent trait that provides an easy and dynamic way to manage photos in your Eloquent models.
 
-
 ## Installation
 
 You can install the package via composer:
@@ -15,6 +14,7 @@ You can install the package via composer:
 ```
 
 You can publish the config file with:
+
 ```bash
 php artisan vendor:publish --provider="Behzadsp\EloquentDynamicPhotos\Providers\EloquentDynamicPhotosServiceProvider"
 ```
@@ -35,7 +35,6 @@ return [
 
 ```
 
-
 ## Usage
 
 After installing the package, simply use the `HasPhotos` trait in your Eloquent models:
@@ -51,7 +50,24 @@ class YourModel extends Model
 }
 ```
 
+Of course, you can override certain config in individual model by declaring the corresponding method. Like below:
 
+```php
+class User extends Model
+{
+    use HasPhotos;
+
+    protected function eloquentPhotoDisk()
+    {
+        return 'user-avatar';
+    }
+
+    protected function eloquentPhotoFormat()
+    {
+        return 'png';
+    }
+}
+```
 
 You can now use the methods provided by the trait in your models:
 
@@ -74,13 +90,11 @@ $model->getPhotoDirectoryPath();
 $model->photo_field_url;
 ```
 
-
 ## Testing
 
 ```bash
   composer test
 ```
-
 
 ## License
 
