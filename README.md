@@ -13,13 +13,13 @@ You can install the package via composer:
 ```bash
   composer require behzadsp/eloquent-dynamic-photos
 ```
-    
+
 You can publish the config file with:
 ```bash
 php artisan vendor:publish --provider="Behzadsp\EloquentDynamicPhotos\Providers\EloquentDynamicPhotosServiceProvider"
 ```
 
-This is the contents of the published config file named `eloquent_photo.php`:
+This is the contents of the global configurations for uploading images.
 
 ```php
 <?php
@@ -50,6 +50,8 @@ class YourModel extends Model
     // ...
 }
 ```
+
+
 
 You can now use the methods provided by the trait in your models:
 
@@ -85,4 +87,3 @@ $model->photo_field_url;
 The MIT License (MIT). Please see License File for more information.
 
 The badges at the top of the README are optional and you'll need to replace the URLs with the correct ones for your package. They provide a quick overview of the package's current version and total downloads.
-
