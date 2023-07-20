@@ -124,4 +124,4 @@ $model->photo_field_url;
 
 ## License
 
-The MIT License (MIT). Please see [License File](https://github.com/git/git-scm.com/blob/main/MIT-LICENSE.txt) for more information.
+The MIT License (MIT). Please see [License File](https://github.com/behzadsp/eloquent-dynamic-photos/blob/main/LICENSE) for more information.
