@@ -27,6 +27,7 @@ This is the contents of the global configurations for uploading images.
 return [
     'disk' => 'public', // Disk to use for storing photos
     'root_directory' => 'images', // Root directory for photos
+    'name_attribute' => 'slug', // Model attribute used for file name
     'quality' => 50, // Quality for encoding the photos
     'format' => 'webp', // Format of the stored photos
     'slug_limit' => 240, // Name limit to save in database
@@ -65,6 +66,31 @@ class User extends Model
     protected function eloquentPhotoFormat()
     {
         return 'png';
+    }
+    
+    protected function eloquentPhotoRootDirectory()
+    {
+        return 'images';
+    }
+    
+    protected function eloquentPhotoQuality()
+    {
+        return '50';
+    }
+    
+    protected function eloquentPhotoNameAttribute()
+    {
+        return 'slug';
+    }
+    
+    protected function eloquentPhotoSlugLimit()
+    {
+        return '240';
+    }
+    
+    protected function eloquentPhotoTimestampFormat()
+    {
+        return 'U';
     }
 }
 ```
