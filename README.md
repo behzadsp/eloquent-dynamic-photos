@@ -5,7 +5,6 @@
 
 This is a Laravel Eloquent trait that provides an easy and dynamic way to manage photos in your Eloquent models.
 
-
 ## Installation
 
 You can install the package via composer:
@@ -13,13 +12,14 @@ You can install the package via composer:
 ```bash
   composer require behzadsp/eloquent-dynamic-photos
 ```
-    
+
 You can publish the config file with:
+
 ```bash
 php artisan vendor:publish --provider="Behzadsp\EloquentDynamicPhotos\Providers\EloquentDynamicPhotosServiceProvider"
 ```
 
-This is the contents of the published config file named `eloquent_photo.php`:
+This is the contents of the global configurations for uploading images.
 
 ```php
 <?php
@@ -35,7 +35,6 @@ return [
 
 ```
 
-
 ## Usage
 
 After installing the package, simply use the `HasPhotos` trait in your Eloquent models:
@@ -48,6 +47,25 @@ class YourModel extends Model
     use HasPhotos;
 
     // ...
+}
+```
+
+Of course, you can override certain config in individual model by declaring the corresponding method. Like below:
+
+```php
+class User extends Model
+{
+    use HasPhotos;
+
+    protected function eloquentPhotoDisk()
+    {
+        return 'user-avatar';
+    }
+
+    protected function eloquentPhotoFormat()
+    {
+        return 'png';
+    }
 }
 ```
 
@@ -72,17 +90,14 @@ $model->getPhotoDirectoryPath();
 $model->photo_field_url;
 ```
 
-
 ## Testing
 
 ```bash
   composer test
 ```
 
-
 ## License
 
 The MIT License (MIT). Please see License File for more information.
 
 The badges at the top of the README are optional and you'll need to replace the URLs with the correct ones for your package. They provide a quick overview of the package's current version and total downloads.
-

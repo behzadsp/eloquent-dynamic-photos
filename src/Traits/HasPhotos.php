@@ -12,7 +12,7 @@ trait HasPhotos
     public function deletePhotoFile(string $photoField): bool
     {
         if ($this->$photoField) {
-            Storage::disk(config('eloquent_photo.disk'))->delete(
+            Storage::disk($this->getEloquentPhotoDisk())->delete(
                 $this->$photoField,
             );
 
@@ -27,16 +27,16 @@ trait HasPhotos
         $this->deletePhotoFile($photoField);
 
         if (
-            !Storage::disk(config('eloquent_photo.disk'))->exists(
-                config('eloquent_photo.root_directory') .
-                '/' .
-                $this->getDirName(),
+            !Storage::disk($this->getEloquentPhotoDisk())->exists(
+                $this->getEloquentPhotoRootDirectory() .
+                    '/' .
+                    $this->getDirName(),
             )
         ) {
-            Storage::disk(config('eloquent_photo.disk'))->makeDirectory(
-                config('eloquent_photo.root_directory') .
-                '/' .
-                $this->getDirName(),
+            Storage::disk($this->getEloquentPhotoDisk())->makeDirectory(
+                $this->getEloquentPhotoRootDirectory() .
+                    '/' .
+                    $this->getDirName(),
             );
         }
 
@@ -44,12 +44,12 @@ trait HasPhotos
 
         Image::make($photo)
             ->encode(
-                config('eloquent_photo.format'),
-                config('eloquent_photo.quality'),
+                $this->getEloquentPhotoFormat(),
+                $this->getEloquentPhotoQuality()
             )
             ->save(
                 $this->getPhotoFullPath($photoPath),
-                config('eloquent_photo.quality'),
+                $this->getEloquentPhotoQuality()
             );
 
         $this->$photoField = $photoPath;
@@ -61,24 +61,24 @@ trait HasPhotos
 
     public function getPhotoFullPath(string $photoPath)
     {
-        return Storage::disk(config('eloquent_photo.disk'))->path($photoPath);
+        return Storage::disk($this->getEloquentPhotoDisk())->path($photoPath);
     }
 
     public function getPhotoDirectoryPath()
     {
-        $nameAttribute = config('eloquent_photo.name_attribute');
+        $nameAttribute = $this->getEloquentPhotoNameAttribute();
 
-        return config('eloquent_photo.root_directory') .
+        return $this->getEloquentPhotoRootDirectory() .
             '/' .
             $this->getDirName() .
             '/' .
             str($this->$nameAttribute)
-                ->limit(config('eloquent_photo.slug_limit'))
-                ->toString() .
+            ->limit($this->getEloquentPhotoSlugLimit())
+            ->toString() .
             '_' .
-            Carbon::now()->format(config('eloquent_photo.timestamp_format')) .
+            Carbon::now()->format($this->getEloquentPhotoTimestampFormat()) .
             '.' .
-            config('eloquent_photo.format');
+            $this->getEloquentPhotoFormat();
     }
 
     public function getDirName(): string
@@ -95,12 +95,75 @@ trait HasPhotos
             $photoField = str_replace('_url', '', $key);
 
             if (array_key_exists($photoField, $this->attributes)) {
-                return Storage::disk(config('eloquent_photo.disk'))->url(
+                return Storage::disk($this->getEloquentPhotoDisk())->url(
                     $this->attributes[$photoField],
                 );
             }
         }
 
         return parent::getAttribute($key);
+    }
+
+    protected function getEloquentPhotoDisk(): string
+    {
+        if (method_exists($this, 'eloquentPhotoDisk')) {
+            return $this->eloquentPhotoDisk();
+        }
+
+        return config('eloquent_photo.disk');
+    }
+
+    protected function getEloquentPhotoRootDirectory(): string
+    {
+        if (method_exists($this, 'eloquentPhotoRootDirectory')) {
+            return $this->eloquentPhotoRootDirectory();
+        }
+
+        return config('eloquent_photo.root_directory');
+    }
+
+    protected function getEloquentPhotoFormat(): string
+    {
+        if (method_exists($this, 'eloquentPhotoFormat')) {
+            return $this->eloquentPhotoFormat();
+        }
+
+        return config('eloquent_photo.format');
+    }
+
+    protected function getEloquentPhotoQuality(): string
+    {
+        if (method_exists($this, 'eloquentPhotoQuality')) {
+            return $this->eloquentPhotoQuality();
+        }
+
+        return config('eloquent_photo.quality');
+    }
+
+    protected function getEloquentPhotoNameAttribute(): string
+    {
+        if (method_exists($this, 'eloquentPhotoNameAttribute')) {
+            return $this->eloquentPhotoNameAttribute();
+        }
+
+        return config('eloquent_photo.name_attribute');
+    }
+
+    protected function getEloquentPhotoSlugLimit(): string
+    {
+        if (method_exists($this, 'eloquentPhotoSlugLimit')) {
+            return $this->eloquentPhotoSlugLimit();
+        }
+
+        return config('eloquent_photo.slug_limit');
+    }
+
+    protected function getEloquentPhotoTimestampFormat(): string
+    {
+        if (method_exists($this, 'eloquentPhotoTimestampFormat')) {
+            return $this->eloquentTimestampFormat();
+        }
+
+        return config('eloquent_photo.timestamp_format');
     }
 }
