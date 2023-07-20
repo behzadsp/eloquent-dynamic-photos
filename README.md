@@ -98,6 +98,4 @@ $model->photo_field_url;
 
 ## License
 
-The MIT License (MIT). Please see License File for more information.
-
-The badges at the top of the README are optional and you'll need to replace the URLs with the correct ones for your package. They provide a quick overview of the package's current version and total downloads.
+The MIT License (MIT). Please see [License File](https://github.com/git/git-scm.com/blob/main/MIT-LICENSE.txt) for more information.
