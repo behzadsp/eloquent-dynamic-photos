@@ -100,10 +100,10 @@ You can now use the methods provided by the trait in your models:
 ```php
 $model = YourModel::first();
 
-// delete photo
+// delete photo file only and not database column.
 $model->deletePhotoFile('photo_field');
 
-// update photo
+// update photo file and save it to database column.
 $model->updatePhoto($photo, 'photo_field');
 
 // get full photo path
