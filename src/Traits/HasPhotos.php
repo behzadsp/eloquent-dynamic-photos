@@ -95,6 +95,10 @@ trait HasPhotos
             $photoField = str_replace('_url', '', $key);
 
             if (array_key_exists($photoField, $this->attributes)) {
+                if ($this->attributes[$photoField] === null) {
+                    return null;
+                }
+                
                 return Storage::disk($this->getEloquentPhotoDisk())->url(
                     $this->attributes[$photoField],
                 );
