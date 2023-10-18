@@ -5,6 +5,7 @@ namespace Behzadsp\EloquentDynamicPhotos\Traits;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Intervention\Image\Facades\Image;
 
 trait HasPhotos
@@ -42,15 +43,14 @@ trait HasPhotos
 
         $photoPath = $this->getPhotoDirectoryPath();
 
-        Image::make($photo)
+        $image = Image::make($photo)
             ->encode(
                 $this->getEloquentPhotoFormat(),
                 $this->getEloquentPhotoQuality()
-            )
-            ->save(
-                $this->getPhotoFullPath($photoPath),
-                $this->getEloquentPhotoQuality()
             );
+
+        Storage::disk($this->getEloquentPhotoDisk())
+            ->put($photoPath, $image->stream($this->getEloquentPhotoFormat(), $this->getEloquentPhotoQuality()));
 
         $this->$photoField = $photoPath;
 
@@ -76,6 +76,8 @@ trait HasPhotos
             ->limit($this->getEloquentPhotoSlugLimit())
             ->toString() .
             '_' .
+            Str::random(5) .
+            '_'.
             Carbon::now()->format($this->getEloquentPhotoTimestampFormat()) .
             '.' .
             $this->getEloquentPhotoFormat();
