@@ -66,21 +66,26 @@ trait HasPhotos
 
     public function getPhotoDirectoryPath()
     {
-        $nameAttribute = $this->getEloquentPhotoNameAttribute();
-
         return $this->getEloquentPhotoRootDirectory() .
             '/' .
             $this->getDirName() .
             '/' .
-            str($this->$nameAttribute)
-            ->limit($this->getEloquentPhotoSlugLimit())
-            ->toString() .
+            $this->getFileName() .
+            '.' .
+            $this->getEloquentPhotoFormat();
+    }
+
+    public function getFileName()
+    {
+        $nameAttribute = $this->getEloquentPhotoNameAttribute();
+
+        return str($this->$nameAttribute)
+                ->limit($this->getEloquentPhotoSlugLimit())
+                ->toString() .
             '_' .
             Str::random(5) .
             '_'.
-            Carbon::now()->format($this->getEloquentPhotoTimestampFormat()) .
-            '.' .
-            $this->getEloquentPhotoFormat();
+            Carbon::now()->format($this->getEloquentPhotoTimestampFormat());
     }
 
     public function getDirName(): string
