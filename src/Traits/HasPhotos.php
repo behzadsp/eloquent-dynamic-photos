@@ -98,7 +98,7 @@ trait HasPhotos
         // time the job runs, just against a worker instead of the uploader.
         if ($definition->conversions !== []) {
             if ($definition->queueConversions) {
-                $job = new ProcessConversionsJob(static::class, $this->eloquentPhotoModelKey(), $field);
+                $job = new ProcessConversionsJob(static::class, $this->eloquentPhotoModelKey(), $field, $newPath);
                 $job->onConnection($this->eloquentPhotoQueueSetting('connection'))
                     ->onQueue($this->eloquentPhotoQueueSetting('name'));
 

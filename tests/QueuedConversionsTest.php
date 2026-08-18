@@ -27,6 +27,15 @@ function queuedThumbPath(Post $post): string
 }
 
 /**
+ * The photo column is nullable per the schema, but every call site below is
+ * immediately after updatePhoto() has set it.
+ */
+function queuedPrimaryPath(Post $post): string
+{
+    return $post->photo ?? throw new RuntimeException('Expected the post to have a stored photo.');
+}
+
+/**
  * getKey() is declared to return mixed, but ProcessConversionsJob needs an
  * int|string identifier. Every model here has an auto-incrementing integer
  * primary key, so this narrows rather than trusts a cast.
@@ -63,12 +72,11 @@ it('dispatches a job instead when queueing is on', function (): void {
         fn (ProcessConversionsJob $job): bool => $job->modelClass === Post::class
             && $job->modelKey === $post->getKey()
             && $job->field === 'photo'
+            && $job->dispatchedPath === $post->photo
     );
 
     // The primary is written synchronously; only conversions are deferred.
-    Storage::disk('photos')->assertExists(
-        $post->photo ?? throw new RuntimeException('Expected the post to have a stored photo.')
-    );
+    Storage::disk('photos')->assertExists(queuedPrimaryPath($post));
     Storage::disk('photos')->assertMissing(queuedThumbPath($post));
 });
 
@@ -86,7 +94,7 @@ it('routes the job to the configured connection and queue', function (): void {
 });
 
 it('waits for the transaction to commit', function (): void {
-    expect((new ProcessConversionsJob(Post::class, 1, 'photo'))->afterCommit)->toBeTrue();
+    expect((new ProcessConversionsJob(Post::class, 1, 'photo', 'irrelevant.webp'))->afterCommit)->toBeTrue();
 });
 
 it('generates the conversions when the job runs', function (): void {
@@ -98,11 +106,43 @@ it('generates the conversions when the job runs', function (): void {
     $thumb = queuedThumbPath($post);
     Storage::disk('photos')->assertMissing($thumb);
 
-    (new ProcessConversionsJob(Post::class, queuedModelKey($post), 'photo'))->handle();
+    (new ProcessConversionsJob(Post::class, queuedModelKey($post), 'photo', queuedPrimaryPath($post)))->handle();
 
     Storage::disk('photos')->assertExists($thumb);
 });
 
 it('does nothing when the row has since been deleted', function (): void {
-    (new ProcessConversionsJob(Post::class, 99999, 'photo'))->handle();
+    (new ProcessConversionsJob(Post::class, 99999, 'photo', 'irrelevant.webp'))->handle();
 })->throwsNoExceptions();
+
+it('does nothing when a newer upload has superseded the photo it was dispatched for', function (): void {
+    Bus::fake();
+    config()->set('eloquent_photo.queue_conversions', true);
+
+    $post = Post::create(['slug' => 'a']);
+    $post->updatePhoto(Fixtures::png(100, 50), 'photo');
+    $stalePath = queuedPrimaryPath($post);
+    $staleThumb = queuedThumbPath($post);
+
+    // A second upload lands — and dispatches its own job — before the first
+    // job runs, replacing the column out from under it.
+    $post->updatePhoto(Fixtures::png(100, 50), 'photo');
+    $freshThumb = queuedThumbPath($post);
+
+    (new ProcessConversionsJob(Post::class, queuedModelKey($post), 'photo', $stalePath))->handle();
+
+    Storage::disk('photos')->assertMissing($staleThumb);
+    Storage::disk('photos')->assertMissing($freshThumb);
+});
+
+it('lets regeneratePhotoConversions still regenerate unconditionally, regardless of any dispatched path', function (): void {
+    $post = Post::create(['slug' => 'a']);
+    $post->updatePhoto(Fixtures::png(100, 50), 'photo');
+    $thumb = queuedThumbPath($post);
+    Storage::disk('photos')->delete($thumb);
+    Storage::disk('photos')->assertMissing($thumb);
+
+    $post->regeneratePhotoConversions('photo');
+
+    Storage::disk('photos')->assertExists($thumb);
+});
