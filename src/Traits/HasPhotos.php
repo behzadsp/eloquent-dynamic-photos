@@ -76,6 +76,14 @@ trait HasPhotos
             // updatePhoto()'s write-then-save-then-delete ordering exists to
             // avoid, arriving through a different door. Deferring to
             // afterCommit() means a rollback never runs the cleanup at all.
+            //
+            // getConnection() only returns ConnectionInterface, which declares
+            // transactionLevel() but not afterCommit() — that exists only on
+            // the concrete Connection class. A connection that isn't one (a
+            // custom or decorated implementation) falls through to immediate
+            // cleanup below and loses rollback protection. Every stock driver
+            // (MySQL, Postgres, SQLite, SQL Server) extends Connection, so
+            // this is a documented limitation, not a handled case.
             if ($connection instanceof Connection && $connection->transactionLevel() > 0) {
                 $connection->afterCommit($cleanup);
 
