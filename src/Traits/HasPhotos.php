@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\Local\LocalFilesystemAdapter;
+use Throwable;
 
 /**
  * @mixin Model
@@ -34,6 +35,72 @@ trait HasPhotos
     protected function photoDefinitions(): array
     {
         return [];
+    }
+
+    /**
+     * Store a new photo for a field, replacing any existing one.
+     *
+     * Ordering matters and is deliberate: the new file is written, then the row
+     * is saved, and only then is the old file removed. A crash midway leaves an
+     * orphaned file, which is recoverable. v1 deleted first, which could leave
+     * the column pointing at a file that no longer existed.
+     */
+    public function updatePhoto(mixed $photo, string $field): static
+    {
+        $definition = $this->eloquentPhotoDefinition($field);
+        $oldPath = $this->eloquentPhotoRawPath($field);
+
+        $newPath = $this->eloquentPhotoPathGenerator()->primaryPath($this, $definition);
+
+        $this->eloquentPhotoProcessor()->storePrimary($photo, $definition->disk, $newPath, $definition);
+
+        $this->setAttribute($field, $newPath);
+
+        try {
+            $this->save();
+        } catch (Throwable $e) {
+            // Nothing durable happened, so leave nothing behind.
+            $this->eloquentPhotoDisk($field)->delete($newPath);
+            $this->setAttribute($field, $oldPath);
+
+            throw $e;
+        }
+
+        if ($oldPath !== null && $oldPath !== $newPath) {
+            $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Delete a field's files and clear its column.
+     */
+    public function deletePhoto(string $field): bool
+    {
+        $path = $this->eloquentPhotoRawPath($field);
+
+        if ($path === null) {
+            return false;
+        }
+
+        $deleted = $this->eloquentPhotoDeleteFilesAt($field, $path);
+
+        $this->setAttribute($field, null);
+        $this->save();
+
+        return $deleted;
+    }
+
+    /**
+     * Delete a field's files and leave its column as it is.
+     *
+     * v1 called this deletePhotoFile and returned true whenever the column was
+     * non-empty, whether or not the delete actually happened.
+     */
+    public function deletePhotoFiles(string $field): bool
+    {
+        return $this->eloquentPhotoDeleteFilesAt($field, $this->eloquentPhotoRawPath($field));
     }
 
     public function photoPath(string $field, ?string $conversion = null): ?string
@@ -196,5 +263,41 @@ trait HasPhotos
     protected function eloquentPhotoProcessor(): PhotoProcessor
     {
         return app(PhotoProcessor::class);
+    }
+
+    /**
+     * Remove a primary file and every conversion derived from it.
+     */
+    protected function eloquentPhotoDeleteFilesAt(string $field, ?string $primaryPath): bool
+    {
+        if ($primaryPath === null) {
+            return false;
+        }
+
+        $definition = $this->eloquentPhotoDefinition($field);
+        $generator = $this->eloquentPhotoPathGenerator();
+        $disk = $this->eloquentPhotoDisk($field);
+
+        $paths = [$primaryPath];
+
+        foreach ($definition->conversions as $name => $conversion) {
+            $paths[] = $generator->conversionPath(
+                $primaryPath,
+                (string) $name,
+                $conversion->format ?? $definition->format
+            );
+        }
+
+        // Report what the filesystem reports, for the primary file.
+        $deleted = $disk->delete($primaryPath);
+
+        foreach (array_slice($paths, 1) as $conversionPath) {
+            // A conversion may legitimately not exist yet.
+            if ($disk->exists($conversionPath)) {
+                $disk->delete($conversionPath);
+            }
+        }
+
+        return $deleted;
     }
 }
