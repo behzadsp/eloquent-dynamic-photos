@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Behzadsp\EloquentDynamicPhotos\Exceptions\InvalidPhotoException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\UnsupportedDiskOperation;
+use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Post;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
@@ -58,10 +59,23 @@ it('does not hijack a real column that happens to end in _url', function (): voi
 });
 
 it('strips only the _url suffix, not every occurrence', function (): void {
-    // v1 used str_replace('_url', '', $key), so url_photo_url became "_photo".
-    $post = Post::create(['slug' => 'a', 'photo' => 'images/posts/a_x_1.webp']);
+    // v1 used str_replace('_url', '', $key), which removes every occurrence
+    // of "_url" in one pass, not just the trailing one. On a field literally
+    // named "image_url", the key "image_url_url" contains "_url" twice: v1's
+    // str_replace strips both, leaving "image" — not a declared field, so v1
+    // fell through to parent::getAttribute() and returned null instead of
+    // the photo url. v2's substr($key, 0, -4) only ever removes the last 4
+    // characters, correctly leaving "image_url", the declared field.
+    Post::$photoDefinitionsOverride = ['image_url' => new PhotoDefinition];
 
-    expect($post->getAttribute('url_photo_url'))->toBeNull();
+    try {
+        $post = Post::create(['slug' => 'a', 'image_url' => 'images/posts/a_x_1.webp']);
+
+        expect($post->getAttribute('image_url_url'))
+            ->toBe(Storage::disk('photos')->url('images/posts/a_x_1.webp'));
+    } finally {
+        Post::$photoDefinitionsOverride = null;
+    }
 });
 
 it('leaves ordinary attributes alone', function (): void {

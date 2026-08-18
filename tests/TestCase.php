@@ -43,6 +43,10 @@ abstract class TestCase extends Orchestra
             // columns (spec defect #7).
             $table->string('website')->nullable();
             $table->string('website_url')->nullable();
+            // Present only to pin defect #6 with a field literally named
+            // "..._url": see PhotoAccessorTest's "strips only the _url
+            // suffix" test.
+            $table->string('image_url')->nullable();
             $table->timestamps();
         });
 
