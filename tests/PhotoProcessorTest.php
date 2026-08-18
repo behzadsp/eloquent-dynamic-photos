@@ -261,12 +261,17 @@ it('rejects an animated WebP whose total pixel budget exceeds the ceiling under 
     ->skip(! extension_loaded('imagick'), 'ext-imagick is not installed');
 
 it('allows an animated WebP through when the pixel ceiling is high enough', function (): void {
+    // The short (3-frame) fixture is enough to prove the ceiling is a tunable
+    // rather than a hard block: 3 * 100 * 100 = 30,000 total pixels, just
+    // under a 30,001 ceiling. Re-encoding the 100-frame fixture here would
+    // only re-prove what "does not treat a handful of frames as an attack"
+    // already covers, at real decode+encode cost.
     config()->set('eloquent_photo.driver', 'imagick');
     app()->forgetInstance(ImageManager::class);
 
-    $definition = new PhotoDefinition(maxPixels: 100_000_000);
+    $definition = new PhotoDefinition(maxPixels: 30_001);
 
-    processor()->storePrimary(hugeAnimatedWebp(), 'photos', 'p/a.webp', $definition);
+    processor()->storePrimary(animatedWebp(3, 100, 100), 'photos', 'p/a.webp', $definition);
 
     Storage::disk('photos')->assertExists('p/a.webp');
 })->skip(! extension_loaded('imagick'), 'ext-imagick is not installed');
