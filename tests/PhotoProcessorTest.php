@@ -23,6 +23,20 @@ function processor(): PhotoProcessor
     return app(PhotoProcessor::class);
 }
 
+/**
+ * An 8000x8000 solid-colour PNG: compresses to ~200 KB on disk but costs
+ * hundreds of MB to decode, since GD must materialise the full bitmap before
+ * it can be scaled down. Built once and cached — two tests need the same
+ * bytes, and building it costs real memory.
+ */
+function hugeSolidPng(): string
+{
+    /** @var string|null $bytes */
+    static $bytes = null;
+
+    return $bytes ??= Fixtures::png(8000, 8000);
+}
+
 function storedImage(string $path): ImageInterface
 {
     $binary = Storage::disk('photos')->get($path);
@@ -92,6 +106,55 @@ it('rejects an integer source, naming what was given', function (): void {
 it('rejects an empty string source', function (): void {
     processor()->storePrimary('', 'photos', 'p/a.webp', new PhotoDefinition);
 })->throws(InvalidPhotoException::class);
+
+it('rejects a stream over the size limit before trying to decode it', function (): void {
+    // Streams used to skip the byte-size guard entirely: assertWithinSizeLimit's
+    // match had no is_resource arm, so every stream fell through to `default
+    // => null` (unknown, skip). This pins the fstat-based fix.
+    $definition = new PhotoDefinition(maxFileSize: 1); // 1 KB
+    $stream = fopen('php://temp', 'r+') ?: throw new RuntimeException('Could not open a temp stream.');
+    fwrite($stream, str_repeat('x', 2048));
+    rewind($stream);
+
+    processor()->storePrimary($stream, 'photos', 'p/a.webp', $definition);
+})->throws(InvalidPhotoException::class, 'exceeds');
+
+it('stores a stream source within the size limit', function (): void {
+    // No over-rejection: fstat must not punish a stream that is genuinely small.
+    $definition = new PhotoDefinition(maxFileSize: 1); // 1 KB
+    $stream = fopen('php://temp', 'r+') ?: throw new RuntimeException('Could not open a temp stream.');
+    fwrite($stream, Fixtures::png());
+    rewind($stream);
+
+    processor()->storePrimary($stream, 'photos', 'p/a.webp', $definition);
+
+    Storage::disk('photos')->assertExists('p/a.webp');
+});
+
+it('rejects an image whose pixel count exceeds the configured ceiling', function (): void {
+    // Compressed byte size is not a proxy for decode memory: this is ~200 KB
+    // on disk but a 64-megapixel bitmap once decoded.
+    $definition = new PhotoDefinition(maxPixels: 1_000_000);
+
+    processor()->storePrimary(hugeSolidPng(), 'photos', 'p/a.webp', $definition);
+})->throws(InvalidPhotoException::class, '8000x8000');
+
+it('allows an oversized image through when the pixel guard is disabled', function (): void {
+    // Same nullable-config pattern as maxWidth/maxHeight: a constructor null
+    // is indistinguishable from "omitted" and falls back to config, so
+    // disabling requires the config value itself to be null.
+    config()->set('eloquent_photo.max_pixels', null);
+
+    processor()->storePrimary(hugeSolidPng(), 'photos', 'p/a.webp', new PhotoDefinition);
+
+    Storage::disk('photos')->assertExists('p/a.webp');
+});
+
+it('leaves a normal image unaffected by the default pixel ceiling', function (): void {
+    processor()->storePrimary(Fixtures::png(), 'photos', 'p/a.webp', new PhotoDefinition);
+
+    Storage::disk('photos')->assertExists('p/a.webp');
+});
 
 it('rejects a path that does not exist', function (): void {
     // Pins existing behaviour: this already worked via the FilesystemException

@@ -17,6 +17,7 @@ it('falls back to package config for every omitted argument', function (): void 
     expect($definition->timestampFormat)->toBe('U');
     expect($definition->maxFileSize)->toBe(10240);
     expect($definition->maxWidth)->toBe(2560);
+    expect($definition->maxPixels)->toBe(40_000_000);
     expect($definition->autoOrient)->toBeTrue();
     expect($definition->queueConversions)->toBeFalse();
     expect($definition->conversions)->toBe([]);

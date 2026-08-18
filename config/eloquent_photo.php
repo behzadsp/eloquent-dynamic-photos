@@ -35,6 +35,13 @@ return [
     'max_width' => 2560,
     'max_height' => 2560,
 
+    // Reject images whose pixel count exceeds this before decoding them. Byte
+    // size is not a proxy for memory: a 200 KB image can be 8000x8000 and cost
+    // several hundred MB to decode, because the full bitmap must exist before it
+    // can be scaled down. Rough arithmetic is ~7 bytes per pixel including
+    // scaling overhead, so raise this and your memory_limit together.
+    'max_pixels' => 40_000_000,
+
     // Allowlist, checked against the decoded image rather than any client-supplied
     // header. SVG is excluded on purpose: served from a public disk it is a stored
     // XSS vector, and it is not a raster format the encoder can normalise.

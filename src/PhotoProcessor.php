@@ -82,6 +82,7 @@ final class PhotoProcessor
     {
         $this->assertValidSourceType($source);
         $this->assertWithinSizeLimit($source, $definition);
+        $this->assertWithinPixelLimit($source, $definition);
 
         try {
             // decode() dispatches on the source type for everything except a
@@ -147,6 +148,7 @@ final class PhotoProcessor
             is_string($source) => $this->looksLikeAPath($source) && is_file($source)
                 ? filesize($source)
                 : strlen($source),
+            is_resource($source) => $this->resourceSize($source),
             default => null,
         };
 
@@ -166,12 +168,110 @@ final class PhotoProcessor
     }
 
     /**
+     * Compressed byte size is not a proxy for decode memory: a highly
+     * compressible image can be a small file and an enormous bitmap, and GD
+     * must materialise the full bitmap before scaleDown() can shrink it. This
+     * reads dimensions from the header only, before decode() would otherwise
+     * build that bitmap.
+     */
+    private function assertWithinPixelLimit(mixed $source, PhotoDefinition $definition): void
+    {
+        if ($definition->maxPixels === null) {
+            return;
+        }
+
+        $dimensions = $this->probeDimensions($source);
+
+        if ($dimensions === null) {
+            // Could not determine dimensions cheaply (e.g. a non-seekable
+            // stream). Do not fail closed: fall through to decode(), where the
+            // byte-size guard above and PHP's memory_limit still apply.
+            return;
+        }
+
+        [$width, $height] = $dimensions;
+        $pixels = $width * $height;
+
+        if ($pixels > $definition->maxPixels) {
+            throw new InvalidPhotoException(sprintf(
+                'The image is %dx%d (%d pixels), which exceeds the %d pixel limit.',
+                $width,
+                $height,
+                $pixels,
+                $definition->maxPixels
+            ));
+        }
+    }
+
+    /**
+     * @return array{0: int, 1: int}|null
+     */
+    private function probeDimensions(mixed $source): ?array
+    {
+        $info = match (true) {
+            $source instanceof SplFileInfo => $source->isFile() ? getimagesize($source->getPathname()) : false,
+            is_resource($source) => $this->probeStreamDimensions($source),
+            is_string($source) => $this->looksLikeAPath($source) && is_file($source)
+                ? getimagesize($source)
+                : getimagesizefromstring($source),
+            default => false,
+        };
+
+        return is_array($info) ? [$info[0], $info[1]] : null;
+    }
+
+    /**
+     * @param  resource  $stream
+     * @return array{0: int, 1: int}|false
+     */
+    private function probeStreamDimensions(mixed $stream): array|false
+    {
+        $meta = stream_get_meta_data($stream);
+
+        if (! $meta['seekable']) {
+            // Cannot read a header chunk without consuming bytes decodeStream()
+            // still needs, and this stream cannot be rewound afterwards.
+            return false;
+        }
+
+        rewind($stream);
+        $header = stream_get_contents($stream, 65536);
+        rewind($stream);
+
+        if ($header === false) {
+            return false;
+        }
+
+        $info = getimagesizefromstring($header);
+
+        return is_array($info) ? [$info[0], $info[1]] : false;
+    }
+
+    /**
      * Cheap guard before handing a string to is_file(). Raw image data is long
      * and contains null bytes; a filesystem path is neither.
      */
     private function looksLikeAPath(string $value): bool
     {
         return strlen($value) < 4096 && ! str_contains($value, "\0");
+    }
+
+    /**
+     * fstat() is cheap and does not consume the stream, unlike reading it to
+     * measure. A non-seekable stream (a pipe, a socket) reports a 0 size here
+     * rather than throwing, which would otherwise silently defeat this guard
+     * entirely — treated the same as "unknown" (null), since it genuinely
+     * cannot be measured this way. The byte guard simply does not apply to it;
+     * the pixel-dimension guard and PHP's memory_limit still do.
+     *
+     * @param  resource  $resource
+     */
+    private function resourceSize(mixed $resource): ?int
+    {
+        $stat = fstat($resource);
+        $size = $stat !== false ? $stat['size'] ?? 0 : 0;
+
+        return $size > 0 ? $size : null;
     }
 
     private function put(string $disk, string $path, ImageInterface $image, string $format, int $quality): void

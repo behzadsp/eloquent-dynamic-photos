@@ -42,6 +42,13 @@ final readonly class PhotoDefinition
 
     public ?int $maxHeight;
 
+    /**
+     * Pixel-count ceiling checked before decoding. Null disables the guard.
+     * Byte size does not bound decode memory: a small compressed file can
+     * still be an enormous bitmap once decoded.
+     */
+    public ?int $maxPixels;
+
     /** @var list<string> */
     public array $allowedMimeTypes;
 
@@ -68,6 +75,7 @@ final readonly class PhotoDefinition
         ?array $allowedMimeTypes = null,
         ?bool $autoOrient = null,
         ?bool $queueConversions = null,
+        ?int $maxPixels = null,
     ) {
         // ponytail: reads config() directly rather than taking an injected defaults
         // array. It keeps all fourteen fallbacks in one place and leaves every
@@ -96,6 +104,10 @@ final readonly class PhotoDefinition
         // key to null to disable the bound globally.
         $this->maxWidth = $maxWidth ?? self::configNullableInt('max_width');
         $this->maxHeight = $maxHeight ?? self::configNullableInt('max_height');
+
+        // Same nullable pattern: null means "use config", and the config value
+        // itself may be null to disable the pixel-count guard globally.
+        $this->maxPixels = $maxPixels ?? self::configNullableInt('max_pixels');
 
         $this->allowedMimeTypes = $allowedMimeTypes ?? self::configStringList('allowed_mime_types');
 
