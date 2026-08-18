@@ -11,7 +11,9 @@ use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Fixtures;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Intervention\Image\Format;
 use Intervention\Image\ImageManager;
+use Intervention\Image\Interfaces\AnimationFactoryInterface;
 use Intervention\Image\Interfaces\ImageInterface;
 
 beforeEach(function (): void {
@@ -35,6 +37,36 @@ function hugeSolidPng(): string
     static $bytes = null;
 
     return $bytes ??= Fixtures::png(8000, 8000);
+}
+
+/**
+ * An N-frame solid-colour GIF. Real animation-frame bytes are needed, not N
+ * copies of a still: the guard under test counts Graphic Control Extension
+ * markers in the encoded bytes, which only real frames produce.
+ */
+function animatedGif(int $frames, int $width, int $height): string
+{
+    return app(ImageManager::class)
+        ->createImage($width, $height, function (AnimationFactoryInterface $animation) use ($frames): void {
+            for ($i = 0; $i < $frames; $i++) {
+                $animation->add($i % 2 === 0 ? '#ff0000' : '#00ff00', 0.04);
+            }
+        })
+        ->encode(Format::create('gif')->encoder(quality: 90))
+        ->toString();
+}
+
+/**
+ * 100 frames at 800x800: 640,000 pixels per frame (well under the default
+ * 40M ceiling) but 64,000,000 once every frame is counted — the evasion the
+ * per-frame-only guard missed. Built once and cached, like hugeSolidPng().
+ */
+function hugeAnimatedGif(): string
+{
+    /** @var string|null $bytes */
+    static $bytes = null;
+
+    return $bytes ??= animatedGif(100, 800, 800);
 }
 
 function storedImage(string $path): ImageInterface
@@ -152,6 +184,34 @@ it('allows an oversized image through when the pixel guard is disabled', functio
 
 it('leaves a normal image unaffected by the default pixel ceiling', function (): void {
     processor()->storePrimary(Fixtures::png(), 'photos', 'p/a.webp', new PhotoDefinition);
+
+    Storage::disk('photos')->assertExists('p/a.webp');
+});
+
+it('rejects an animated image whose total pixel budget exceeds the ceiling', function (): void {
+    // 100 frames at 800x800 is 640,000 pixels per frame -- comfortably under
+    // the default 40M ceiling -- but 64,000,000 once every frame is
+    // decoded. getimagesize() only ever reports frame one, so the guard must
+    // fold frame count into the budget, not just width x height.
+    processor()->storePrimary(hugeAnimatedGif(), 'photos', 'p/a.webp', new PhotoDefinition);
+})->throws(InvalidPhotoException::class, '64000000');
+
+it('allows an animated image through when the pixel ceiling is high enough', function (): void {
+    $definition = new PhotoDefinition(maxPixels: 100_000_000);
+
+    processor()->storePrimary(hugeAnimatedGif(), 'photos', 'p/a.webp', $definition);
+
+    Storage::disk('photos')->assertExists('p/a.webp');
+});
+
+it('does not treat a handful of animation frames as an attack', function (): void {
+    processor()->storePrimary(animatedGif(3, 100, 100), 'photos', 'p/a.webp', new PhotoDefinition);
+
+    Storage::disk('photos')->assertExists('p/a.webp');
+});
+
+it('leaves a static GIF unaffected by the pixel ceiling', function (): void {
+    processor()->storePrimary(Fixtures::gif(), 'photos', 'p/a.webp', new PhotoDefinition);
 
     Storage::disk('photos')->assertExists('p/a.webp');
 });

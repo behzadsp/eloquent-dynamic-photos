@@ -169,10 +169,14 @@ final class PhotoProcessor
 
     /**
      * Compressed byte size is not a proxy for decode memory: a highly
-     * compressible image can be a small file and an enormous bitmap, and GD
-     * must materialise the full bitmap before scaleDown() can shrink it. This
-     * reads dimensions from the header only, before decode() would otherwise
-     * build that bitmap.
+     * compressible image can be a small file and an enormous bitmap, and the
+     * driver must materialise every frame before scaleDown() can shrink them.
+     * getimagesize() only ever reports frame one, so a low-resolution
+     * animation with many frames (a 100-frame 800x800 GIF is a 640,000-pixel
+     * image by that measure, but 64,000,000 pixels once every frame is
+     * decoded) needs its frame count folded into the budget too. This reads
+     * everything from the raw bytes, before decode() would otherwise build
+     * those bitmaps.
      */
     private function assertWithinPixelLimit(mixed $source, PhotoDefinition $definition): void
     {
@@ -180,23 +184,31 @@ final class PhotoProcessor
             return;
         }
 
-        $dimensions = $this->probeDimensions($source);
+        $bytes = $this->probeBytes($source);
 
-        if ($dimensions === null) {
-            // Could not determine dimensions cheaply (e.g. a non-seekable
-            // stream). Do not fail closed: fall through to decode(), where the
+        if ($bytes === null) {
+            // Could not read the bytes cheaply (e.g. a non-seekable stream).
+            // Do not fail closed: fall through to decode(), where the
             // byte-size guard above and PHP's memory_limit still apply.
             return;
         }
 
-        [$width, $height] = $dimensions;
-        $pixels = $width * $height;
+        $info = getimagesizefromstring($bytes);
+
+        if (! is_array($info)) {
+            return;
+        }
+
+        [$width, $height] = $info;
+        $frames = $this->frameCount($bytes);
+        $pixels = $width * $height * $frames;
 
         if ($pixels > $definition->maxPixels) {
             throw new InvalidPhotoException(sprintf(
-                'The image is %dx%d (%d pixels), which exceeds the %d pixel limit.',
+                'The image is %dx%d across %d frame(s) (%d total pixels), which exceeds the %d pixel limit.',
                 $width,
                 $height,
+                $frames,
                 $pixels,
                 $definition->maxPixels
             ));
@@ -204,47 +216,71 @@ final class PhotoProcessor
     }
 
     /**
-     * @return array{0: int, 1: int}|null
+     * Raw bytes for the two cheap probes above: not a header snippet, because
+     * counting GIF frames needs a marker that can appear anywhere in the
+     * file. This still costs nothing like decoding: it is bounded by
+     * maxFileSize for everything but a non-seekable stream, which is skipped
+     * rather than read to an unknown length.
      */
-    private function probeDimensions(mixed $source): ?array
+    private function probeBytes(mixed $source): ?string
     {
-        $info = match (true) {
-            $source instanceof SplFileInfo => $source->isFile() ? getimagesize($source->getPathname()) : false,
-            is_resource($source) => $this->probeStreamDimensions($source),
+        $bytes = match (true) {
+            $source instanceof SplFileInfo => $source->isFile() ? file_get_contents($source->getPathname()) : false,
+            is_resource($source) => $this->readSeekableStream($source),
             is_string($source) => $this->looksLikeAPath($source) && is_file($source)
-                ? getimagesize($source)
-                : getimagesizefromstring($source),
+                ? file_get_contents($source)
+                : $source,
             default => false,
         };
 
-        return is_array($info) ? [$info[0], $info[1]] : null;
+        return is_string($bytes) && $bytes !== '' ? $bytes : null;
     }
 
     /**
      * @param  resource  $stream
-     * @return array{0: int, 1: int}|false
      */
-    private function probeStreamDimensions(mixed $stream): array|false
+    private function readSeekableStream(mixed $stream): string|false
     {
         $meta = stream_get_meta_data($stream);
 
         if (! $meta['seekable']) {
-            // Cannot read a header chunk without consuming bytes decodeStream()
+            // Cannot read the stream without consuming bytes decodeStream()
             // still needs, and this stream cannot be rewound afterwards.
             return false;
         }
 
         rewind($stream);
-        $header = stream_get_contents($stream, 65536);
+        $contents = stream_get_contents($stream);
         rewind($stream);
 
-        if ($header === false) {
-            return false;
+        return $contents;
+    }
+
+    /**
+     * GIF is the proven vector (intervention/gif, a hard dependency of
+     * intervention/image, decodes every frame; GD and Imagick both need the
+     * full bitmap before scaleDown() can shrink it). Frame count is read from
+     * the bytes rather than by decoding: each frame is preceded by a Graphic
+     * Control Extension block, whose introducer, label and block-size bytes
+     * are fixed by the GIF89a spec (0x21, 0xF9, 0x04), including for a
+     * single-frame GIF. Verified against real GD- and Imagick-encoded
+     * 100-frame GIFs (exact match) and a static one (1 marker).
+     *
+     * This is a marker count, not a full GIF parser: those three bytes could
+     * in principle recur inside compressed frame data. That only inflates the
+     * count, which is the safe direction for a guard whose job is to reject.
+     *
+     * Other animated formats are not handled here: the reviewer's animated
+     * WebP did not reproduce the bomb on this driver, and this package does
+     * not touch APNG/animated AVIF today.
+     */
+    private function frameCount(string $bytes): int
+    {
+        if (! str_starts_with($bytes, 'GIF87a') && ! str_starts_with($bytes, 'GIF89a')) {
+            return 1;
         }
 
-        $info = getimagesizefromstring($header);
-
-        return is_array($info) ? [$info[0], $info[1]] : false;
+        return max(1, substr_count($bytes, "\x21\xF9\x04"));
     }
 
     /**

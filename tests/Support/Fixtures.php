@@ -23,6 +23,11 @@ final class Fixtures
         return self::encode($width, $height, 'jpeg');
     }
 
+    public static function gif(int $width = 40, int $height = 30): string
+    {
+        return self::encode($width, $height, 'gif');
+    }
+
     private static function encode(int $width, int $height, string $format): string
     {
         return app(ImageManager::class)
