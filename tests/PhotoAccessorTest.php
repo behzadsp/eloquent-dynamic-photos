@@ -32,9 +32,9 @@ it('exposes the stored path and its url', function (): void {
 it('derives conversion paths and urls', function (): void {
     $post = Post::create(['slug' => 'a', 'photo' => 'images/posts/a_x_1.webp']);
 
-    expect($post->photoPath('photo', 'thumb'))->toBe('images/posts/conversions/a_x_1-thumb.webp');
+    expect($post->photoPath('photo', 'thumb'))->toBe('images/posts/conversions/a_x_1/thumb.webp');
     expect($post->photoUrl('photo', 'thumb'))
-        ->toBe(Storage::disk('photos')->url('images/posts/conversions/a_x_1-thumb.webp'));
+        ->toBe(Storage::disk('photos')->url('images/posts/conversions/a_x_1/thumb.webp'));
 });
 
 it('rejects a conversion name that was never declared', function (): void {

@@ -35,11 +35,22 @@ final class Post extends Model
     protected $guarded = [];
 
     /**
+     * Lets a test simulate photoDefinitions() changing between two calls on
+     * the same row — a conversion removed, renamed, or reformatted after a
+     * photo was already stored — without a second model class. Null means
+     * "use the defaults below". A test that sets this must reset it to null
+     * afterwards.
+     *
+     * @var array<string, PhotoDefinition>|null
+     */
+    public static ?array $photoDefinitionsOverride = null;
+
+    /**
      * @return array<string, PhotoDefinition>
      */
     protected function photoDefinitions(): array
     {
-        return [
+        return self::$photoDefinitionsOverride ?? [
             'photo' => new PhotoDefinition(
                 conversions: [
                     'thumb' => new Conversion(width: 20, height: 20, fit: Fit::Cover),

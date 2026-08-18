@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Behzadsp\EloquentDynamicPhotos\Traits;
 
+use Behzadsp\EloquentDynamicPhotos\Conversion;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\InvalidPhotoException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\UnsupportedDiskOperation;
@@ -135,7 +136,7 @@ trait HasPhotos
         $processor = $this->eloquentPhotoProcessor();
 
         foreach ($definition->conversions as $name => $conversion) {
-            $format = $conversion->format ?? $definition->format;
+            $format = $this->eloquentConversionFormat($definition, $conversion);
 
             $processor->storeConversion(
                 $definition->disk,
@@ -212,7 +213,7 @@ trait HasPhotos
             return $primary;
         }
 
-        $format = $definition->conversion($conversion)->format ?? $definition->format;
+        $format = $this->eloquentConversionFormat($definition, $definition->conversion($conversion));
 
         return $this->eloquentPhotoPathGenerator()->conversionPath($primary, $conversion, $format);
     }
@@ -384,7 +385,25 @@ trait HasPhotos
     }
 
     /**
+     * A conversion inherits the field's format unless it declares its own.
+     * Pulled out so that rule lives in exactly one place, used everywhere a
+     * conversion's actual encoded format is needed.
+     */
+    private function eloquentConversionFormat(PhotoDefinition $definition, Conversion $conversion): string
+    {
+        return $conversion->format ?? $definition->format;
+    }
+
+    /**
      * Remove a primary file and every conversion derived from it.
+     *
+     * Deletes the primary's whole conversion directory rather than deriving
+     * paths from what is currently declared: declared conversions are never
+     * recorded anywhere, so a name-by-name delete would miss a conversion
+     * that has since been removed, renamed, or reformatted, leaking its file
+     * permanently. The directory is deleted whole instead, which covers all
+     * of them regardless of what is currently declared, and is a no-op if it
+     * never existed (e.g. a field with no declared conversions).
      */
     protected function eloquentPhotoDeleteFilesAt(string $field, ?string $primaryPath): bool
     {
@@ -392,29 +411,12 @@ trait HasPhotos
             return false;
         }
 
-        $definition = $this->eloquentPhotoDefinition($field);
-        $generator = $this->eloquentPhotoPathGenerator();
         $disk = $this->eloquentPhotoDisk($field);
-
-        $paths = [$primaryPath];
-
-        foreach ($definition->conversions as $name => $conversion) {
-            $paths[] = $generator->conversionPath(
-                $primaryPath,
-                (string) $name,
-                $conversion->format ?? $definition->format
-            );
-        }
 
         // Report what the filesystem reports, for the primary file.
         $deleted = $disk->delete($primaryPath);
 
-        foreach (array_slice($paths, 1) as $conversionPath) {
-            // A conversion may legitimately not exist yet.
-            if ($disk->exists($conversionPath)) {
-                $disk->delete($conversionPath);
-            }
-        }
+        $disk->deleteDirectory($this->eloquentPhotoPathGenerator()->conversionDirectory($primaryPath));
 
         return $deleted;
     }

@@ -71,10 +71,14 @@ final class PathGenerator
     }
 
     /**
-     * Conversion paths are derived from the stored primary path rather than
-     * recorded, which is why v2 needs no schema change.
+     * Every conversion derived from one primary lives under one directory,
+     * named after that primary, so it can be deleted whole. Declared
+     * conversions are never recorded anywhere, so deleting by declared name
+     * would miss a conversion that has since been removed, renamed, or
+     * reformatted — silently orphaning its file. Deleting the directory
+     * instead covers all of them, regardless of what is currently declared.
      */
-    public function conversionPath(string $primaryPath, string $conversionName, string $format): string
+    public function conversionDirectory(string $primaryPath): string
     {
         $directory = dirname($primaryPath);
         $basename = pathinfo($primaryPath, PATHINFO_FILENAME);
@@ -82,7 +86,16 @@ final class PathGenerator
         // dirname() returns "." for a path with no directory component.
         $prefix = ($directory === '.' || $directory === '') ? '' : $directory.'/';
 
-        return $prefix.'conversions/'.$basename.'-'.$conversionName.'.'.$format;
+        return $prefix.'conversions/'.$basename;
+    }
+
+    /**
+     * Conversion paths are derived from the stored primary path rather than
+     * recorded, which is why v2 needs no schema change.
+     */
+    public function conversionPath(string $primaryPath, string $conversionName, string $format): string
+    {
+        return $this->conversionDirectory($primaryPath).'/'.$conversionName.'.'.$format;
     }
 
     private function truncate(string $value, int $limit): string

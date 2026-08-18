@@ -67,12 +67,24 @@ it('uses the model key when the name attribute is null', function (): void {
 
 it('derives conversion paths from the stored primary path', function (): void {
     expect(generator()->conversionPath('images/posts/a-post_ab12x_1723.webp', 'thumb', 'jpeg'))
-        ->toBe('images/posts/conversions/a-post_ab12x_1723-thumb.jpeg');
+        ->toBe('images/posts/conversions/a-post_ab12x_1723/thumb.jpeg');
 });
 
 it('derives conversion paths for a primary stored at the disk root', function (): void {
     expect(generator()->conversionPath('a-post.webp', 'thumb', 'webp'))
-        ->toBe('conversions/a-post-thumb.webp');
+        ->toBe('conversions/a-post/thumb.webp');
+});
+
+it('derives one conversion directory per primary, shared by every conversion under it', function (): void {
+    expect(generator()->conversionDirectory('images/posts/a-post_ab12x_1723.webp'))
+        ->toBe('images/posts/conversions/a-post_ab12x_1723');
+
+    expect(generator()->conversionPath('images/posts/a-post_ab12x_1723.webp', 'thumb', 'jpeg'))
+        ->toStartWith(generator()->conversionDirectory('images/posts/a-post_ab12x_1723.webp').'/');
+});
+
+it('derives a conversion directory for a primary stored at the disk root', function (): void {
+    expect(generator()->conversionDirectory('a-post.webp'))->toBe('conversions/a-post');
 });
 
 it('cannot be used to make prefix() emit a directory traversal segment', function (): void {
