@@ -28,15 +28,15 @@ trait HasPhotos
         $this->deletePhotoFile($photoField);
 
         if (
-            !Storage::disk($this->getEloquentPhotoDisk())->exists(
-                $this->getEloquentPhotoRootDirectory() .
-                    '/' .
+            ! Storage::disk($this->getEloquentPhotoDisk())->exists(
+                $this->getEloquentPhotoRootDirectory().
+                    '/'.
                     $this->getDirName(),
             )
         ) {
             Storage::disk($this->getEloquentPhotoDisk())->makeDirectory(
-                $this->getEloquentPhotoRootDirectory() .
-                    '/' .
+                $this->getEloquentPhotoRootDirectory().
+                    '/'.
                     $this->getDirName(),
             );
         }
@@ -66,12 +66,12 @@ trait HasPhotos
 
     public function getPhotoDirectoryPath()
     {
-        return $this->getEloquentPhotoRootDirectory() .
-            '/' .
-            $this->getDirName() .
-            '/' .
-            $this->getFileName() .
-            '.' .
+        return $this->getEloquentPhotoRootDirectory().
+            '/'.
+            $this->getDirName().
+            '/'.
+            $this->getFileName().
+            '.'.
             $this->getEloquentPhotoFormat();
     }
 
@@ -80,10 +80,10 @@ trait HasPhotos
         $nameAttribute = $this->getEloquentPhotoNameAttribute();
 
         return str($this->$nameAttribute)
-                ->limit($this->getEloquentPhotoSlugLimit())
-                ->toString() .
-            '_' .
-            Str::random(5) .
+            ->limit($this->getEloquentPhotoSlugLimit())
+            ->toString().
+            '_'.
+            Str::random(5).
             '_'.
             Carbon::now()->format($this->getEloquentPhotoTimestampFormat());
     }
@@ -105,7 +105,7 @@ trait HasPhotos
                 if ($this->attributes[$photoField] === null) {
                     return null;
                 }
-                
+
                 return Storage::disk($this->getEloquentPhotoDisk())->url(
                     $this->attributes[$photoField],
                 );

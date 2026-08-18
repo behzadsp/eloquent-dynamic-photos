@@ -6,3 +6,12 @@ parameters:
     paths:
         - src
     treatPhpDocTypesAsCertain: false
+
+    # A library trait has no consumer inside this repo by definition — its
+    # consumers are downstream applications — so trait.unused fires
+    # permanently here, not transiently. This is a correct, permanent
+    # ignore, not a temporary silencing.
+    ignoreErrors:
+        -
+            identifier: trait.unused
+            path: src/Traits/HasPhotos.php
