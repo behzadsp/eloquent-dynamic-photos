@@ -17,7 +17,7 @@ it('binds an ImageManager using the configured driver', function (): void {
     expect(app(ImageManager::class))->toBe(app(ImageManager::class));
 });
 
-it('resolves the gd driver by default', function (): void {
+it('resolves the gd driver from the shipped config default', function (): void {
     // ImageManager::$driver is public in v4.
     expect(app(ImageManager::class)->driver)->toBeInstanceOf(GdDriver::class);
 });
