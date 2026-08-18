@@ -42,9 +42,10 @@ trait HasPhotos
      * Store a new photo for a field, replacing any existing one.
      *
      * Ordering matters and is deliberate: the new file is written, then the row
-     * is saved, and only then is the old file removed. A crash midway leaves an
-     * orphaned file, which is recoverable. v1 deleted first, which could leave
-     * the column pointing at a file that no longer existed.
+     * is saved, then declared conversions are (re)generated, and only then is
+     * the old file removed. A crash midway leaves an orphaned file, which is
+     * recoverable. v1 deleted first, which could leave the column pointing at
+     * a file that no longer existed.
      *
      * Calls save(), so any other unsaved changes on the model are persisted
      * too.
@@ -82,6 +83,16 @@ trait HasPhotos
             throw $e;
         }
 
+        // Not best-effort, unlike the old-file cleanup below: a caller who
+        // declares a conversion expects it to exist. The primary is already
+        // saved at this point, so a failure here doesn't undo that, but it
+        // must still surface — swallowing it would leave photoPath()/photoUrl()
+        // pointing at a conversion that silently doesn't exist, which is a
+        // worse failure mode than a thrown exception the caller can see and
+        // act on (including by calling regeneratePhotoConversions() again
+        // later, since it's idempotent).
+        $this->regeneratePhotoConversions($field);
+
         if ($oldPath !== null && $oldPath !== $newPath) {
             try {
                 // Best-effort: the save already succeeded, so a failure here
@@ -95,6 +106,45 @@ trait HasPhotos
         }
 
         return $this;
+    }
+
+    /**
+     * Build every declared conversion from the currently stored primary file.
+     *
+     * Idempotent — regenerating an existing conversion overwrites it — so this
+     * doubles as the backfill for photos stored before a conversion was
+     * declared.
+     *
+     * Uses eloquentPhotoRawPath(), not the ...UsableRawPath() variant: this
+     * method is public and writes files at paths derived from the primary, so
+     * a tampered column (a ".." segment or null byte) must fail loudly here
+     * exactly as it does in photoPath(), rather than being silently treated
+     * as "no photo". Silently no-op-ing would let a caller believe conversions
+     * were (re)generated when a tampered row was actually never touched.
+     */
+    public function regeneratePhotoConversions(string $field): void
+    {
+        $definition = $this->eloquentPhotoDefinition($field);
+        $primary = $this->eloquentPhotoRawPath($field);
+
+        if ($primary === null || $definition->conversions === []) {
+            return;
+        }
+
+        $generator = $this->eloquentPhotoPathGenerator();
+        $processor = $this->eloquentPhotoProcessor();
+
+        foreach ($definition->conversions as $name => $conversion) {
+            $format = $conversion->format ?? $definition->format;
+
+            $processor->storeConversion(
+                $definition->disk,
+                $primary,
+                $generator->conversionPath($primary, (string) $name, $format),
+                $definition,
+                $conversion,
+            );
+        }
     }
 
     /**
