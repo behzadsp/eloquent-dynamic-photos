@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\PathGenerator;
 use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
 use Behzadsp\EloquentDynamicPhotos\Providers\EloquentDynamicPhotosServiceProvider;
@@ -21,12 +22,35 @@ it('resolves the gd driver by default', function (): void {
     expect(app(ImageManager::class)->driver)->toBeInstanceOf(GdDriver::class);
 });
 
-it('resolves the imagick driver when configured', function (): void {
+it('resolves the gd driver when explicitly configured', function (): void {
+    config()->set('eloquent_photo.driver', 'gd');
+    app()->forgetInstance(ImageManager::class);
+
+    expect(app(ImageManager::class)->driver)->toBeInstanceOf(GdDriver::class);
+});
+
+it('resolves the imagick driver after the cached instance is forgotten', function (): void {
     config()->set('eloquent_photo.driver', 'imagick');
     app()->forgetInstance(ImageManager::class);
 
     expect(app(ImageManager::class)->driver)->toBeInstanceOf(ImagickDriver::class);
 })->skip(! extension_loaded('imagick'), 'ext-imagick is not installed');
+
+it('rejects an unrecognised driver value', function (): void {
+    config()->set('eloquent_photo.driver', 'immagick');
+    app()->forgetInstance(ImageManager::class);
+
+    expect(fn () => app(ImageManager::class))
+        ->toThrow(PhotoDefinitionException::class, 'Config key [eloquent_photo.driver] must be "gd" or "imagick", "immagick" given.');
+});
+
+it('rejects a null driver value', function (): void {
+    config()->set('eloquent_photo.driver', null);
+    app()->forgetInstance(ImageManager::class);
+
+    expect(fn () => app(ImageManager::class))
+        ->toThrow(PhotoDefinitionException::class, 'Config key [eloquent_photo.driver] must be "gd" or "imagick", null given.');
+});
 
 it('binds a PathGenerator seeded with the configured root directory', function (): void {
     config()->set('eloquent_photo.directory', 'uploads');
