@@ -6,6 +6,7 @@ namespace Behzadsp\EloquentDynamicPhotos;
 
 use Behzadsp\EloquentDynamicPhotos\Exceptions\InvalidPhotoException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
+use Behzadsp\EloquentDynamicPhotos\Exceptions\StorageFailedException;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Intervention\Image\Exceptions\ArgumentException;
 use Intervention\Image\Exceptions\DecoderException;
@@ -334,7 +335,22 @@ final class PhotoProcessor
         }
 
         // One encode. v1 encoded twice by discarding the result of the first.
-        $this->filesystem->disk($disk)->put($path, $image->encode($encoder)->toString());
+        //
+        // put() returns false rather than throwing unless the disk opts into
+        // exceptions via a per-disk 'throw' config key, which Laravel's own
+        // shipped filesystems config does not set — so on a default install a
+        // rejected write is otherwise silent. The caller would then save a
+        // column pointing at a path with no file behind it, or skip a
+        // conversion write outright.
+        $written = $this->filesystem->disk($disk)->put($path, $image->encode($encoder)->toString());
+
+        if ($written === false) {
+            throw new StorageFailedException(sprintf(
+                'Failed writing [%s] to disk [%s].',
+                $path,
+                $disk
+            ));
+        }
     }
 
     private function axis(?int $value): int

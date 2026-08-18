@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Behzadsp\EloquentDynamicPhotos\Conversion;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\InvalidPhotoException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
+use Behzadsp\EloquentDynamicPhotos\Exceptions\StorageFailedException;
 use Behzadsp\EloquentDynamicPhotos\Fit;
 use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
 use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
@@ -395,3 +396,29 @@ it('fails clearly when the conversion source is missing', function (): void {
         new PhotoDefinition, new Conversion(width: 20),
     );
 })->throws(InvalidPhotoException::class, 'p/gone.webp');
+
+it('throws a storage failure when the disk rejects the primary write', function (): void {
+    // put() returns false rather than throwing unless the disk opts into
+    // exceptions, which the default Laravel filesystems config does not.
+    // A partial mock: only put() is stubbed, everything else (get(),
+    // assertExists()) still hits the real fake disk.
+    $rejectingDisk = Mockery::mock(Storage::disk('photos'));
+    $rejectingDisk->shouldReceive('put')->andReturn(false);
+    Storage::set('photos', $rejectingDisk);
+
+    processor()->storePrimary(Fixtures::png(), 'photos', 'p/a.webp', new PhotoDefinition);
+})->throws(StorageFailedException::class, 'p/a.webp');
+
+it('throws a storage failure when the disk rejects a conversion write', function (): void {
+    $definition = new PhotoDefinition;
+    processor()->storePrimary(Fixtures::png(100, 50), 'photos', 'p/a.webp', $definition);
+
+    $rejectingDisk = Mockery::mock(Storage::disk('photos'));
+    $rejectingDisk->shouldReceive('put')->andReturn(false);
+    Storage::set('photos', $rejectingDisk);
+
+    processor()->storeConversion(
+        'photos', 'p/a.webp', 'p/conversions/a-thumb.webp',
+        $definition, new Conversion(width: 20, height: 20),
+    );
+})->throws(StorageFailedException::class, 'p/conversions/a-thumb.webp');
