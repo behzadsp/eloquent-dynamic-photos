@@ -5,8 +5,8 @@ declare(strict_types=1);
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\Jobs\ProcessConversionsJob;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Fixtures;
+use Behzadsp\EloquentDynamicPhotos\Tests\Support\PlainPost;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Post;
-use Behzadsp\EloquentDynamicPhotos\Tests\Support\SoftPost;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
@@ -42,7 +42,7 @@ function queuedPrimaryPath(Post $post): string
  * getKey() is declared to return mixed, but ProcessConversionsJob needs an
  * int|string identifier. Every model here has an auto-incrementing integer
  * primary key, so this narrows rather than trusts a cast. Takes any Model
- * (not just Post) since it is also used with SoftPost below.
+ * (not just Post) since it is also used with PlainPost below.
  */
 function queuedModelKey(Model $model): int|string
 {
@@ -155,11 +155,11 @@ it('throws when dispatched for a model class that does not use HasPhotos', funct
     // The dispatched path deliberately does NOT match the column: the
     // missing-trait check must fire before the superseded-upload comparison
     // gets a chance to return quietly on the mismatch instead.
-    $softPost = SoftPost::create(['slug' => 'a']);
+    $plainPost = PlainPost::create(['slug' => 'a']);
 
     expect(fn () => (new ProcessConversionsJob(
-        SoftPost::class,
-        queuedModelKey($softPost),
+        PlainPost::class,
+        queuedModelKey($plainPost),
         'photo',
         'irrelevant.webp'
     ))->handle())->toThrow(PhotoDefinitionException::class);

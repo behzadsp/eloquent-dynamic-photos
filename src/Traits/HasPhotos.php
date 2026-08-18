@@ -30,6 +30,43 @@ trait HasPhotos
     private ?array $eloquentPhotoDefinitionsCache = null;
 
     /**
+     * Removes a model's photo files once the row itself is gone.
+     *
+     * v1 had no such hook, so every deleted row orphaned its files
+     * permanently.
+     */
+    public static function bootHasPhotos(): void
+    {
+        static::deleted(static function (self $model): void {
+            if (config('eloquent_photo.delete_files_on_model_delete') !== true) {
+                return;
+            }
+
+            // A soft-deleted row can be restored, so its files must survive.
+            // isForceDeleting() only exists on SoftDeletes; its absence means
+            // there is nothing "soft" about this delete, so the files go.
+            if (method_exists($model, 'isForceDeleting') && ! $model->isForceDeleting()) {
+                return;
+            }
+
+            foreach (array_keys($model->eloquentPhotoDefinitions()) as $field) {
+                try {
+                    // Best-effort: the row is already gone by the time
+                    // `deleted` fires, so a filesystem failure here must not
+                    // surface as an exception out of a delete() call that
+                    // already succeeded — same reasoning as the best-effort
+                    // cleanups in updatePhoto()/deletePhoto() below. Exception,
+                    // not Throwable: a genuine programming fault must still
+                    // crash.
+                    $model->deletePhotoFiles($field);
+                } catch (Exception) {
+                    // Swallowed — see comment above.
+                }
+            }
+        });
+    }
+
+    /**
      * Declare which columns hold photos, and how each one is handled.
      *
      * Override this in the model. Keys are column names.
