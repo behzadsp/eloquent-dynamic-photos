@@ -65,10 +65,18 @@ final class ProcessConversionsJob implements ShouldQueue
             ));
         }
 
-        if ($model->getAttribute($this->field) !== $this->dispatchedPath) {
+        if (($model->getAttributes()[$this->field] ?? null) !== $this->dispatchedPath) {
             // Superseded: a newer upload already replaced this field and
             // dispatched its own job for the current primary. This job's
             // primary is gone, so there is nothing left for it to do.
+            //
+            // getAttributes(), not getAttribute(): the latter applies casts,
+            // and $dispatchedPath is the raw string the column was written
+            // as. A cast on this field (e.g. AsStringable) would make
+            // getAttribute() return a non-string object that can never equal
+            // $dispatchedPath, permanently no-op-ing this job. HasPhotos
+            // itself reads the same raw array internally for this reason —
+            // see eloquentPhotoRawPath().
             return;
         }
 

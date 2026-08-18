@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\Jobs\ProcessConversionsJob;
+use Behzadsp\EloquentDynamicPhotos\Tests\Support\CastPost;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Fixtures;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\PlainPost;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Post;
@@ -147,6 +148,23 @@ it('lets regeneratePhotoConversions still regenerate unconditionally, regardless
     Storage::disk('photos')->assertMissing($thumb);
 
     $post->regeneratePhotoConversions('photo');
+
+    Storage::disk('photos')->assertExists($thumb);
+});
+
+it('generates conversions when the photo column has a cast', function (): void {
+    // getAttribute() would return a Stringable here, never equal to the raw
+    // $dispatchedPath string — this isolates that from any queueing config.
+    $post = CastPost::create(['slug' => 'a']);
+    $post->updatePhoto(Fixtures::png(100, 50), 'photo');
+    $rawPath = $post->photoPath('photo')
+        ?? throw new RuntimeException('Expected the post to have a stored photo.');
+    $thumb = $post->photoPath('photo', 'thumb')
+        ?? throw new RuntimeException('Expected the post to have a thumb conversion path.');
+    Storage::disk('photos')->delete($thumb);
+    Storage::disk('photos')->assertMissing($thumb);
+
+    (new ProcessConversionsJob(CastPost::class, queuedModelKey($post), 'photo', $rawPath))->handle();
 
     Storage::disk('photos')->assertExists($thumb);
 });
