@@ -7,7 +7,7 @@ namespace Behzadsp\EloquentDynamicPhotos\Tests\Support;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class SoftPost extends Model
+final class SoftPost extends Model
 {
     use SoftDeletes;
 
