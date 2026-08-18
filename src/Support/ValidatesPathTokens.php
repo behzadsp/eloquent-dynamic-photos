@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Behzadsp\EloquentDynamicPhotos\Traits;
+namespace Behzadsp\EloquentDynamicPhotos\Support;
 
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 

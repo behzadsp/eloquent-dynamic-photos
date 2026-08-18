@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Behzadsp\EloquentDynamicPhotos;
 
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
-use Behzadsp\EloquentDynamicPhotos\Traits\ValidatesPathTokens;
+use Behzadsp\EloquentDynamicPhotos\Support\ValidatesPathTokens;
 
 /**
  * Per-field photo configuration. Any argument left null falls back to the
