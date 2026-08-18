@@ -48,7 +48,7 @@ trait HasPhotos
     public function updatePhoto(mixed $photo, string $field): static
     {
         $definition = $this->eloquentPhotoDefinition($field);
-        $oldPath = $this->eloquentPhotoRawPath($field);
+        $oldPath = $this->eloquentPhotoUsableRawPath($field);
 
         $newPath = $this->eloquentPhotoPathGenerator()->primaryPath($this, $definition);
 
@@ -75,16 +75,22 @@ trait HasPhotos
 
     /**
      * Delete a field's files and clear its column.
+     *
+     * A stored value that fails the tamper check in eloquentPhotoRawPath() is
+     * still cleared: refusing to hand back an escaping path is right, but
+     * refusing to let anyone clean up leaves the row bricked, recoverable
+     * only via raw SQL. Nothing is deleted from disk in that case, hence
+     * false, but the column is fixed.
      */
     public function deletePhoto(string $field): bool
     {
-        $path = $this->eloquentPhotoRawPath($field);
+        $rawValue = $this->attributes[$field] ?? null;
 
-        if ($path === null) {
+        if (! is_string($rawValue) || $rawValue === '') {
             return false;
         }
 
-        $deleted = $this->eloquentPhotoDeleteFilesAt($field, $path);
+        $deleted = $this->eloquentPhotoDeleteFilesAt($field, $this->eloquentPhotoUsableRawPath($field));
 
         $this->setAttribute($field, null);
         $this->save();
@@ -100,7 +106,7 @@ trait HasPhotos
      */
     public function deletePhotoFiles(string $field): bool
     {
-        return $this->eloquentPhotoDeleteFilesAt($field, $this->eloquentPhotoRawPath($field));
+        return $this->eloquentPhotoDeleteFilesAt($field, $this->eloquentPhotoUsableRawPath($field));
     }
 
     public function photoPath(string $field, ?string $conversion = null): ?string
@@ -248,6 +254,28 @@ trait HasPhotos
         }
 
         return $value;
+    }
+
+    /**
+     * Like eloquentPhotoRawPath(), but never throws: a tampered value is
+     * treated the same as an empty column, both meaning "no path here that
+     * can be safely acted on".
+     *
+     * eloquentPhotoRawPath() must keep throwing for the read paths above —
+     * this package never hands back a path that could escape the disk root.
+     * But the write and cleanup methods need the opposite failure mode: a
+     * column corrupted by, e.g., $guarded = [] plus mass assignment should be
+     * fixable by overwriting or clearing it, not permanently bricked because
+     * every method that touches it throws first. Callers here never perform
+     * filesystem I/O with a null result, only skip it.
+     */
+    protected function eloquentPhotoUsableRawPath(string $field): ?string
+    {
+        try {
+            return $this->eloquentPhotoRawPath($field);
+        } catch (InvalidPhotoException) {
+            return null;
+        }
     }
 
     protected function eloquentPhotoDisk(string $field): Filesystem
