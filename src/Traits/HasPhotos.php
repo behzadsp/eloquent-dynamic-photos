@@ -143,7 +143,7 @@ trait HasPhotos
                 // Exception, not Throwable: a disk hiccup is swallowed, but an
                 // Error (TypeError, a programming fault) is not this catch's
                 // job to hide and must still crash.
-                $this->eloquentPhotoDisk($field)->delete($newPath);
+                $this->eloquentPhotoFilesystem($field)->delete($newPath);
             } catch (Exception) {
                 // Swallowed — see comment above.
             }
@@ -305,7 +305,7 @@ trait HasPhotos
             return null;
         }
 
-        return $this->eloquentPhotoDisk($field)->url($path);
+        return $this->eloquentPhotoFilesystem($field)->url($path);
     }
 
     public function photoFullPath(string $field, ?string $conversion = null): ?string
@@ -316,7 +316,7 @@ trait HasPhotos
             return null;
         }
 
-        $disk = $this->eloquentPhotoDisk($field);
+        $disk = $this->eloquentPhotoFilesystem($field);
 
         // Introspect the resolved adapter rather than a "driver" key read from
         // config: Storage::fake() swaps in a LocalFilesystemAdapter directly
@@ -448,7 +448,7 @@ trait HasPhotos
         }
     }
 
-    protected function eloquentPhotoDisk(string $field): Filesystem
+    protected function eloquentPhotoFilesystem(string $field): Filesystem
     {
         return Storage::disk($this->eloquentPhotoDefinition($field)->disk);
     }
@@ -524,7 +524,7 @@ trait HasPhotos
             return false;
         }
 
-        $disk = $this->eloquentPhotoDisk($field);
+        $disk = $this->eloquentPhotoFilesystem($field);
 
         // Report what the filesystem reports, for the primary file.
         $deleted = $disk->delete($primaryPath);
