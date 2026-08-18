@@ -55,13 +55,17 @@ what was there before — but it means a v1-era row carrying a tampered value th
 back a (wrong) value will now throw on read instead, until it's re-uploaded.
 
 **`deletePhotoFiles()` deletes immediately — it does not wait for a transaction to commit.**
-`deletePhoto()` and the model-delete cleanup hook both defer their file deletion until the
-enclosing transaction commits, so a rollback can't leave a restored row pointing at a file
-that's already gone. `deletePhotoFiles()` is different by design: its whole purpose is to
-remove files while leaving the column untouched, so there's no column change for a rollback to
-undo, and deferring the delete would only leave files sitting around for no benefit. Calling
-`deletePhotoFiles()` inside a transaction you might roll back does not protect the files —
-they're gone immediately, even if the transaction later aborts.
+`updatePhoto()`'s old-file cleanup, `deletePhoto()`'s cleanup, and the model-delete cleanup
+hook all defer their file deletion until the enclosing transaction commits, so a rollback can't
+leave a reverted/restored row pointing at a file that's already gone. `deletePhotoFiles()` is
+different by design: its whole purpose is to remove files while leaving the column untouched,
+so there's no column change for a rollback to undo, and deferring the delete would only leave
+files sitting around for no benefit. Calling `deletePhotoFiles()` inside a transaction you
+might roll back does not protect the files — they're gone immediately, even if the transaction
+later aborts. (Under Laravel's `RefreshDatabase`/`DatabaseTransactions` test wrapper, the other
+three run their deferred cleanup immediately too, since that wrapper's own transaction never
+really commits — so a plain test asserting a file is gone after `updatePhoto()`/`deletePhoto()`
+still passes without you having to account for this.)
 
 ## Before / after
 

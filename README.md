@@ -142,7 +142,7 @@ return [
 | `max_pixels` | Reject an image whose *decoded* pixel budget (width × height × frame count) exceeds this, checked before decoding. See "The memory guard is incomplete" below. |
 | `allowed_mime_types` | Allowlist checked against the decoded image, not any client-supplied header. SVG is deliberately absent — see below. |
 | `auto_orient` | Bake EXIF rotation into the pixels before encoding. Needs `ext-exif`; a no-op without it. |
-| `delete_files_on_model_delete` | Whether the delete hook (below) runs at all. |
+| `delete_files_on_model_delete` | Whether the delete hook runs at all. Must be a real boolean or a booleanish string — see below. |
 | `queue_conversions` | Generate named conversions on a queue instead of inline during `updatePhoto()`. |
 | `queue.connection` / `queue.name` | Queue connection/name for conversion jobs. `null` uses the app's defaults. |
 
@@ -155,6 +155,17 @@ itself to pick up the change.
 **SVG is excluded from the default allowlist on purpose.** It is not a raster format the
 encoder can normalise, and an SVG served back from a public disk is a stored XSS vector.
 Do not add it unless you understand and accept that risk.
+
+**`delete_files_on_model_delete` must be a real boolean or a booleanish string**
+(`true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`) — anything else, including `null`, throws
+`PhotoDefinitionException` rather than silently disabling cleanup. The realistic way to hit
+this is `env('PHOTO_DELETE_FILES_ON_MODEL_DELETE')` with no default, which is `null` when the
+variable isn't set. This is deliberate: the package fails loudly on bad config everywhere else,
+and this check runs inside the `deleted` event listener, so it throws *after* the row is
+already deleted (or soft-deleted) — the delete itself isn't rolled back, only the file cleanup
+never runs. It also throws for soft deletes, not just hard ones, because this check runs before
+the soft-delete check that would otherwise skip file handling entirely. Give `env()` a default
+if you use it for this key.
 
 ### Storage layout
 
@@ -174,7 +185,7 @@ stores no separate conversion columns and needs no migration. This has a consequ
 
 | Method | Behaviour |
 |---|---|
-| `updatePhoto(mixed $photo, string $field): static` | Validate, encode, store the primary, `save()`, generate/queue conversions, then delete the old file(s). |
+| `updatePhoto(mixed $photo, string $field): static` | Validate, encode, store the primary, `save()`, generate/queue conversions, then delete the old file(s) — deferred until the enclosing transaction commits, if there is one, so a rollback doesn't leave the old file gone while the column is reverted. |
 | `deletePhoto(string $field): bool` | Clear the column, `save()`, then delete the file(s) — deferred until the enclosing transaction commits, if there is one, so a rollback doesn't leave the file gone while the column is restored. Returns whether there was a photo recorded to delete, not whether the disk deletion has actually happened yet: `false` means the column was already empty or unusable, `true` means the column was cleared and cleanup was scheduled (or run immediately, best-effort, outside a transaction). |
 | `deletePhotoFiles(string $field): bool` | Delete the file(s), leave the column as it is. The boolean reflects only the primary file's own delete outcome — `false` also covers "there was nothing recorded to delete" (an empty or tampered column), not just a failed disk operation. The conversions directory is deleted alongside it, but that outcome isn't reflected in the return value at all. |
 | `photoUrl(string $field, ?string $conversion = null): ?string` | Public URL, or `null` if the column is empty. |
@@ -187,6 +198,15 @@ Passing a conversion name that isn't declared on that field to `photoUrl()`, `ph
 or `photoFullPath()` throws `PhotoDefinitionException` rather than silently returning a URL
 to a file that was never generated. Calling any of these methods (or `updatePhoto()`) with a
 field that isn't a key in `photoDefinitions()` throws the same exception.
+
+**"Deferred until commit" doesn't mean "never" in your tests.** `updatePhoto()`'s old-file
+cleanup, `deletePhoto()`'s cleanup, and the model-delete hook (below) all defer their file
+deletion to the enclosing transaction's commit when there is one, so a rollback can't leave a
+restored/reverted row pointing at a file that's already gone. Under Laravel's testing
+transaction wrapper (`RefreshDatabase`/`DatabaseTransactions`), that callback runs immediately
+instead of waiting for a commit that never really happens — so a test that calls
+`updatePhoto()` or `deletePhoto()` directly (without wrapping it in its own `DB::transaction()`)
+and then asserts the old file is gone still passes.
 
 All exceptions this package throws extend `Behzadsp\EloquentDynamicPhotos\Exceptions\EloquentPhotoException`
 (itself a `RuntimeException`), so you can catch one type if you want. The others are
