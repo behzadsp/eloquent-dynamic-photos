@@ -10,6 +10,7 @@ use Behzadsp\EloquentDynamicPhotos\Exceptions\UnsupportedDiskOperation;
 use Behzadsp\EloquentDynamicPhotos\PathGenerator;
 use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
 use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
+use Exception;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\FilesystemAdapter;
@@ -44,6 +45,9 @@ trait HasPhotos
      * is saved, and only then is the old file removed. A crash midway leaves an
      * orphaned file, which is recoverable. v1 deleted first, which could leave
      * the column pointing at a file that no longer existed.
+     *
+     * Calls save(), so any other unsaved changes on the model are persisted
+     * too.
      */
     public function updatePhoto(mixed $photo, string $field): static
     {
@@ -67,8 +71,11 @@ trait HasPhotos
                 // Best-effort: nothing durable happened, so this is tidying up
                 // an orphan, not something the caller needs to hear about. If
                 // it fails too, $e (why the save failed) is what matters.
+                // Exception, not Throwable: a disk hiccup is swallowed, but an
+                // Error (TypeError, a programming fault) is not this catch's
+                // job to hide and must still crash.
                 $this->eloquentPhotoDisk($field)->delete($newPath);
-            } catch (Throwable) {
+            } catch (Exception) {
                 // Swallowed — see comment above.
             }
 
@@ -79,9 +86,10 @@ trait HasPhotos
             try {
                 // Best-effort: the save already succeeded, so a failure here
                 // must not turn a successful update into an error. It only
-                // leaves an orphaned file behind.
+                // leaves an orphaned file behind. Exception, not Throwable —
+                // see the comment in the catch block above.
                 $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
-            } catch (Throwable) {
+            } catch (Exception) {
                 // Swallowed — see comment above.
             }
         }
@@ -102,6 +110,9 @@ trait HasPhotos
      * and only then are the files removed. Deleting first would leave the
      * column pointing at a file that no longer existed if the save then
      * failed — the same dead-pointer bug updatePhoto() exists to avoid.
+     *
+     * Calls save(), so any other unsaved changes on the model are persisted
+     * too.
      */
     public function deletePhoto(string $field): bool
     {
@@ -119,9 +130,10 @@ trait HasPhotos
         try {
             // Best-effort: the column is already cleared and saved, so a
             // failure here must not turn a successful delete into an error.
-            // It only leaves an orphaned file behind.
+            // It only leaves an orphaned file behind. Exception, not
+            // Throwable — see the comment in updatePhoto()'s catch block.
             return $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
-        } catch (Throwable) {
+        } catch (Exception) {
             return false;
         }
     }

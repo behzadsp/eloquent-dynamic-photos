@@ -145,3 +145,18 @@ it('does not fail the update when cleaning up the old file fails after a success
     expect($post->photo)->not->toBe($original);
     Storage::disk('photos')->assertExists(storedPath($post));
 });
+
+it('lets a programming error from the old-file cleanup crash rather than swallowing it', function (): void {
+    // A disk hiccup (an Exception) during best-effort cleanup is swallowed —
+    // see the test above — but an Error (a TypeError, a genuine bug) is not
+    // this cleanup's job to hide.
+    $post = Post::create(['slug' => 'my-post']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+
+    $brokenDisk = Mockery::mock(Storage::disk('photos'));
+    $brokenDisk->shouldReceive('delete')->andThrow(new TypeError('a programming fault'));
+    Storage::set('photos', $brokenDisk);
+
+    expect(fn () => $post->updatePhoto(Fixtures::png(), 'photo'))
+        ->toThrow(TypeError::class, 'a programming fault');
+});

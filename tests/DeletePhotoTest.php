@@ -90,3 +90,17 @@ it('leaves the file and column alone when the save fails', function (): void {
         Post::flushEventListeners();
     }
 });
+
+it('lets a programming error from the file cleanup crash rather than swallowing it', function (): void {
+    // A disk hiccup (an Exception) after the column is already cleared and
+    // saved is swallowed — reported as false — but an Error (a TypeError, a
+    // genuine bug) is not this cleanup's job to hide.
+    $post = postWithPhoto();
+
+    $brokenDisk = Mockery::mock(Storage::disk('photos'));
+    $brokenDisk->shouldReceive('delete')->andThrow(new TypeError('a programming fault'));
+    Storage::set('photos', $brokenDisk);
+
+    expect(fn () => $post->deletePhoto('photo'))
+        ->toThrow(TypeError::class, 'a programming fault');
+});
