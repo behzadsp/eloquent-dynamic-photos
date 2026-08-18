@@ -76,6 +76,30 @@ it('rejects a source that is not a decodable image', function (): void {
     processor()->storePrimary('this is not an image', 'photos', 'p/a.webp', new PhotoDefinition);
 })->throws(InvalidPhotoException::class, 'could not be decoded');
 
+it('rejects a null source, naming what was given', function (): void {
+    // The realistic trigger: $request->file('photo') is null when no file was uploaded.
+    processor()->storePrimary(null, 'photos', 'p/a.webp', new PhotoDefinition);
+})->throws(InvalidPhotoException::class, 'null');
+
+it('rejects an array source, naming what was given', function (): void {
+    processor()->storePrimary([], 'photos', 'p/a.webp', new PhotoDefinition);
+})->throws(InvalidPhotoException::class, 'array');
+
+it('rejects an integer source, naming what was given', function (): void {
+    processor()->storePrimary(123, 'photos', 'p/a.webp', new PhotoDefinition);
+})->throws(InvalidPhotoException::class, 'int');
+
+it('rejects an empty string source', function (): void {
+    processor()->storePrimary('', 'photos', 'p/a.webp', new PhotoDefinition);
+})->throws(InvalidPhotoException::class);
+
+it('rejects a path that does not exist', function (): void {
+    // Pins existing behaviour: this already worked via the FilesystemException
+    // branch, since a leading "/" makes Intervention's own heuristic guess it
+    // could be a file path.
+    processor()->storePrimary('/nonexistent/x.png', 'photos', 'p/a.webp', new PhotoDefinition);
+})->throws(InvalidPhotoException::class, 'could not be decoded');
+
 it('rejects a media type outside the allowlist', function (): void {
     $definition = new PhotoDefinition(allowedMimeTypes: ['image/png']);
 

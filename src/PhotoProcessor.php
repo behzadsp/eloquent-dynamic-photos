@@ -7,6 +7,7 @@ namespace Behzadsp\EloquentDynamicPhotos;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\InvalidPhotoException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
+use Intervention\Image\Exceptions\ArgumentException;
 use Intervention\Image\Exceptions\DecoderException;
 use Intervention\Image\Exceptions\FilesystemException;
 use Intervention\Image\Format;
@@ -79,6 +80,7 @@ final class PhotoProcessor
 
     private function decode(mixed $source, PhotoDefinition $definition): ImageInterface
     {
+        $this->assertValidSourceType($source);
         $this->assertWithinSizeLimit($source, $definition);
 
         try {
@@ -87,13 +89,16 @@ final class PhotoProcessor
             $image = is_resource($source)
                 ? $this->images->decodeStream($source)
                 : $this->images->decode($source);
-        } catch (DecoderException|FilesystemException $e) {
+        } catch (DecoderException|FilesystemException|ArgumentException $e) {
             // decode() picks a decoder by guessing the input's shape: an
             // all-printable-ASCII string that is not valid image data still
             // "looks like" a file path to that guess, so a garbage string
             // reaches FilePathImageDecoder and fails with FileNotFoundException
-            // (a FilesystemException) rather than a DecoderException. Both mean
-            // the same thing here: this source could not become an image.
+            // (a FilesystemException) rather than a DecoderException. ArgumentException
+            // is the third family, for shapes assertValidSourceType() lets through
+            // but decode() still can't place (belt-and-braces; it should be
+            // unreachable given the guard above). All three mean the same thing
+            // here: this source could not become an image.
             throw new InvalidPhotoException(
                 'The given source could not be decoded as an image.',
                 previous: $e
@@ -113,6 +118,26 @@ final class PhotoProcessor
         }
 
         return $image;
+    }
+
+    /**
+     * decode() otherwise dispatches by guessing at the input's shape, so a
+     * caller mistake (e.g. $request->file('photo') being null because nothing
+     * was uploaded) reaches Intervention and leaks one of its own exceptions
+     * through this package's boundary instead of an InvalidPhotoException.
+     */
+    private function assertValidSourceType(mixed $source): void
+    {
+        $isAcceptable = $source instanceof SplFileInfo
+            || is_resource($source)
+            || (is_string($source) && $source !== '');
+
+        if (! $isAcceptable) {
+            throw new InvalidPhotoException(sprintf(
+                'A photo source must be an uploaded file, a path, binary image data or a stream, %s given.',
+                $source === '' ? 'an empty string' : get_debug_type($source)
+            ));
+        }
     }
 
     private function assertWithinSizeLimit(mixed $source, PhotoDefinition $definition): void
