@@ -39,7 +39,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: gd, exif, mbstring
+          extensions: gd, imagick, exif, mbstring
           coverage: none
 
       - name: Install dependencies
@@ -59,7 +59,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: gd, exif, mbstring
+          extensions: gd, imagick, exif, mbstring
           coverage: none
       - run: composer update --prefer-dist --no-interaction --no-progress
       - run: vendor/bin/phpstan analyse
