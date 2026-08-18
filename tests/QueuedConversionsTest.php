@@ -152,10 +152,10 @@ it('lets regeneratePhotoConversions still regenerate unconditionally, regardless
 });
 
 it('throws when dispatched for a model class that does not use HasPhotos', function (): void {
-    // The column must match $dispatchedPath, or the superseded-upload check
-    // above would return quietly first and this would never reach the
-    // method_exists() check this test is for.
-    $softPost = SoftPost::create(['slug' => 'a', 'photo' => 'irrelevant.webp']);
+    // The dispatched path deliberately does NOT match the column: the
+    // missing-trait check must fire before the superseded-upload comparison
+    // gets a chance to return quietly on the mismatch instead.
+    $softPost = SoftPost::create(['slug' => 'a']);
 
     expect(fn () => (new ProcessConversionsJob(
         SoftPost::class,

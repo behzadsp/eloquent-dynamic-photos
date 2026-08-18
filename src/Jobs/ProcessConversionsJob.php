@@ -51,23 +51,25 @@ final class ProcessConversionsJob implements ShouldQueue
             return;
         }
 
-        if ($model->getAttribute($this->field) !== $this->dispatchedPath) {
-            // Superseded: a newer upload already replaced this field and
-            // dispatched its own job for the current primary. This job's
-            // primary is gone, so there is nothing left for it to do.
-            return;
-        }
-
         if (! method_exists($model, 'regeneratePhotoConversions')) {
             // A model class that doesn't use HasPhotos was dispatched here —
             // a programming error (wrong $modelClass), not a race any caller
-            // can hit legitimately, so this throws rather than returning
-            // quietly like the two checks above.
+            // can hit legitimately. Checked before the superseded-upload
+            // comparison below: an unrelated model's column would almost
+            // never match $dispatchedPath, so that check would return
+            // quietly first and mask this one every time it actually matters.
             throw new PhotoDefinitionException(sprintf(
                 '%s does not use the HasPhotos trait, so its [%s] conversions cannot be regenerated.',
                 $this->modelClass,
                 $this->field
             ));
+        }
+
+        if ($model->getAttribute($this->field) !== $this->dispatchedPath) {
+            // Superseded: a newer upload already replaced this field and
+            // dispatched its own job for the current primary. This job's
+            // primary is gone, so there is nothing left for it to do.
+            return;
         }
 
         $model->regeneratePhotoConversions($this->field);
