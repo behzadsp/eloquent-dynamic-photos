@@ -1,23 +1,24 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Behzadsp\EloquentDynamicPhotos\Providers;
 
 use Illuminate\Support\ServiceProvider;
 
 class EloquentDynamicPhotosServiceProvider extends ServiceProvider
 {
-    public function boot()
+    public function register(): void
     {
-        $this->publishes([
-            __DIR__.'/../config/eloquent_photo.php' => config_path('eloquent_photo.php'),
-        ], 'config');
-
-        // Load default configuration
-        $this->mergeConfigFrom(__DIR__.'/../config/eloquent_photo.php', 'eloquent_photo');
+        $this->mergeConfigFrom(__DIR__.'/../../config/eloquent_photo.php', 'eloquent_photo');
     }
 
-    public function register()
+    public function boot(): void
     {
-        //
+        if ($this->app->runningInConsole()) {
+            $this->publishes([
+                __DIR__.'/../../config/eloquent_photo.php' => config_path('eloquent_photo.php'),
+            ], 'eloquent-photo-config');
+        }
     }
 }

@@ -3,34 +3,55 @@
     "description": "A Laravel Eloquent trait for dynamically handling and managing photo storage with ease.",
     "license": "MIT",
     "homepage": "https://github.com/behzadsp/eloquent-dynamic-photos",
-    "keywords": [
-        "behzadsp",
-        "eloquent",
-        "dynamic",
-        "photo",
-        "image"
-    ],
-    "autoload": {
-        "psr-4": {
-            "Behzadsp\\EloquentDynamicPhotos\\": "src/"
-        }
-    },
+    "keywords": ["behzadsp", "eloquent", "dynamic", "photo", "image", "laravel"],
     "authors": [
         {
             "name": "Behzad Soltanpour"
         }
     ],
     "require": {
-        "php": ">=7.4",
-        "ext-gd": "*",
-        "illuminate/support": "^7.0|^8.0|^9.0|^10.0|^11.0",
-        "illuminate/database": "^7.0|^8.0|^9.0|^10.0|^11.0",
-        "illuminate/filesystem": "^7.0|^8.0|^9.0|^10.0|^11.0",
-        "nesbot/carbon": "^2.53",
-        "intervention/image": "^2.7"
+        "php": "^8.3",
+        "illuminate/bus": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/contracts": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/database": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/filesystem": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/queue": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/support": "^11.0 || ^12.0 || ^13.0",
+        "intervention/image": "^4.2"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.10",
+        "laravel/pint": "^1.30",
+        "orchestra/testbench": "^9.0 || ^10.0 || ^11.0",
+        "pestphp/pest": "^4.0 || ^5.0",
+        "pestphp/pest-plugin-laravel": "^4.0 || ^5.0"
+    },
+    "suggest": {
+        "ext-gd": "Required for the default 'gd' image driver.",
+        "ext-imagick": "Required for the 'imagick' image driver.",
+        "ext-exif": "Required for auto_orient to read EXIF orientation. Without it, phone photos may be stored sideways."
+    },
+    "autoload": {
+        "psr-4": {
+            "Behzadsp\\EloquentDynamicPhotos\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Behzadsp\\EloquentDynamicPhotos\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "test:coverage": "pest --coverage",
+        "lint": "pint",
+        "analyse": "phpstan analyse"
     },
     "config": {
-        "sort-packages": true
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
     },
     "extra": {
         "laravel": {
@@ -38,5 +59,7 @@
                 "Behzadsp\\EloquentDynamicPhotos\\Providers\\EloquentDynamicPhotosServiceProvider"
             ]
         }
-    }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
 }
