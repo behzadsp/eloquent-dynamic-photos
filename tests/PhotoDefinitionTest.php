@@ -61,3 +61,33 @@ it('rejects a conversions array holding something other than Conversion objects'
     // @phpstan-ignore argument.type (deliberately wrong element type, to exercise the runtime guard)
     new PhotoDefinition(conversions: ['thumb' => 100]);
 })->throws(PhotoDefinitionException::class, 'must be a Conversion');
+
+it('accepts an env()-shaped numeric string for an integer config value', function (): void {
+    config()->set('eloquent_photo.quality', '80');
+
+    expect((new PhotoDefinition)->quality)->toBe(80);
+});
+
+it('still rejects an ambiguous numeric string for an integer config value', function (): void {
+    config()->set('eloquent_photo.quality', '80.5');
+
+    new PhotoDefinition;
+})->throws(PhotoDefinitionException::class, 'must be an integer');
+
+it('accepts an env()-shaped booleanish string for a boolean config value', function (): void {
+    config()->set('eloquent_photo.queue_conversions', '1');
+
+    expect((new PhotoDefinition)->queueConversions)->toBeTrue();
+});
+
+it('still rejects an unrecognised string for a boolean config value', function (): void {
+    config()->set('eloquent_photo.queue_conversions', 'banana');
+
+    new PhotoDefinition;
+})->throws(PhotoDefinitionException::class, 'must be a boolean');
+
+it('rejects a non-list allowed_mime_types config value', function (): void {
+    config()->set('eloquent_photo.allowed_mime_types', ['a' => 'image/png']);
+
+    new PhotoDefinition;
+})->throws(PhotoDefinitionException::class, 'must be a list of strings');
