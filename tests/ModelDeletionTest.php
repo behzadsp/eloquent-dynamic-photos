@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Fixtures;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Post;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\SoftPost;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function (): void {
@@ -91,3 +92,48 @@ it('leaves the files alone when the config flag is off', function (): void {
 it('does not fall over deleting a model with no photos stored', function (): void {
     Post::create(['slug' => 'a'])->delete();
 })->throwsNoExceptions();
+
+it('keeps the files when the deleting transaction rolls back', function (): void {
+    $post = Post::create(['slug' => 'a']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+    $primary = deletedPrimaryPath($post);
+
+    try {
+        DB::transaction(function () use ($post): void {
+            $post->delete();
+
+            throw new RuntimeException('rolled back on purpose');
+        });
+    } catch (RuntimeException) {
+        // Expected — see above.
+    }
+
+    expect(Post::query()->find($post->getKey()))->not->toBeNull();
+    Storage::disk('photos')->assertExists($primary);
+});
+
+it('deletes the files once the deleting transaction commits', function (): void {
+    $post = Post::create(['slug' => 'a']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+    $primary = deletedPrimaryPath($post);
+
+    DB::transaction(function () use ($post): void {
+        $post->delete();
+    });
+
+    expect(Post::query()->find($post->getKey()))->toBeNull();
+    Storage::disk('photos')->assertMissing($primary);
+});
+
+it('keeps the files when a soft delete commits inside a transaction', function (): void {
+    $post = SoftPost::create(['slug' => 'a']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+    $primary = deletedPrimaryPath($post);
+
+    DB::transaction(function () use ($post): void {
+        $post->delete();
+    });
+
+    expect($post->trashed())->toBeTrue();
+    Storage::disk('photos')->assertExists($primary);
+});

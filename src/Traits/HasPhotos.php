@@ -14,6 +14,7 @@ use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
 use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
 use Exception;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Bus;
@@ -49,20 +50,39 @@ trait HasPhotos
                 return;
             }
 
-            foreach (array_keys($model->eloquentPhotoDefinitions()) as $field) {
-                try {
-                    // Best-effort: the row is already gone by the time
-                    // `deleted` fires, so a filesystem failure here must not
-                    // surface as an exception out of a delete() call that
-                    // already succeeded — same reasoning as the best-effort
-                    // cleanups in updatePhoto()/deletePhoto() below. Exception,
-                    // not Throwable: a genuine programming fault must still
-                    // crash.
-                    $model->deletePhotoFiles($field);
-                } catch (Exception) {
-                    // Swallowed — see comment above.
+            $cleanup = static function () use ($model): void {
+                foreach (array_keys($model->eloquentPhotoDefinitions()) as $field) {
+                    try {
+                        // Best-effort: the row is already gone by the time
+                        // `deleted` fires, so a filesystem failure here must
+                        // not surface as an exception out of a delete() call
+                        // that already succeeded — same reasoning as the
+                        // best-effort cleanups in updatePhoto()/deletePhoto()
+                        // below. Exception, not Throwable: a genuine
+                        // programming fault must still crash.
+                        $model->deletePhotoFiles($field);
+                    } catch (Exception) {
+                        // Swallowed — see comment above.
+                    }
                 }
+            };
+
+            $connection = $model->getConnection();
+
+            // `deleted` fires synchronously, before commit, but file I/O is
+            // not transactional: deleting the files immediately and then
+            // having the transaction roll back would restore the row while
+            // its files stay gone — a dead pointer, the same defect class
+            // updatePhoto()'s write-then-save-then-delete ordering exists to
+            // avoid, arriving through a different door. Deferring to
+            // afterCommit() means a rollback never runs the cleanup at all.
+            if ($connection instanceof Connection && $connection->transactionLevel() > 0) {
+                $connection->afterCommit($cleanup);
+
+                return;
             }
+
+            $cleanup();
         });
     }
 
