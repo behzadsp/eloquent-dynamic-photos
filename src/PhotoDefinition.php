@@ -71,6 +71,10 @@ final readonly class PhotoDefinition
         // consumer free of null checks, and every test here already needs a booted
         // app for Storage::fake(). Inject a defaults array if that ever stops being
         // true.
+        if ($directory !== null) {
+            self::assertSafeDirectory($directory);
+        }
+
         $this->disk = $disk ?? self::configString('disk');
         $this->directory = $directory;
         $this->nameAttribute = $nameAttribute ?? self::configString('name_attribute');
@@ -112,6 +116,37 @@ final readonly class PhotoDefinition
                 $name,
                 $this->conversions === [] ? 'none' : implode(', ', array_keys($this->conversions))
             ));
+    }
+
+    /**
+     * The directory override is trusted developer configuration, not request
+     * data — but it commonly interpolates a model attribute to build a
+     * per-tenant path (e.g. "tenants/{$tenant->slug}"), which puts the same
+     * class of user-controllable value here that the name attribute's
+     * sanitizer exists to neutralise. Unlike the name attribute, this string
+     * is never slugified — a slash is a legitimate separator here — so a
+     * traversal segment is rejected outright at declaration time rather than
+     * silently rewritten at upload time.
+     */
+    private static function assertSafeDirectory(string $directory): void
+    {
+        if (str_contains($directory, '\\')) {
+            throw new PhotoDefinitionException(self::unsafeDirectoryError($directory));
+        }
+
+        foreach (explode('/', $directory) as $segment) {
+            if ($segment === '.' || $segment === '..') {
+                throw new PhotoDefinitionException(self::unsafeDirectoryError($directory));
+            }
+        }
+    }
+
+    private static function unsafeDirectoryError(string $directory): string
+    {
+        return sprintf(
+            'Directory [%s] must not contain ".", ".." or backslash segments.',
+            $directory
+        );
     }
 
     private static function config(string $key): mixed

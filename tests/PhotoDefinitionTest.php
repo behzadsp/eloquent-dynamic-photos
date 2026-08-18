@@ -91,3 +91,23 @@ it('rejects a non-list allowed_mime_types config value', function (): void {
 
     new PhotoDefinition;
 })->throws(PhotoDefinitionException::class, 'must be a list of strings');
+
+it('rejects a directory override containing a traversal segment', function (): void {
+    new PhotoDefinition(directory: 'tenants/../../../etc');
+})->throws(PhotoDefinitionException::class, 'tenants/../../../etc');
+
+it('rejects a directory override that is entirely a traversal segment', function (): void {
+    new PhotoDefinition(directory: '../etc');
+})->throws(PhotoDefinitionException::class, '../etc');
+
+it('rejects a directory override containing a current-directory segment', function (): void {
+    new PhotoDefinition(directory: 'a/./b');
+})->throws(PhotoDefinitionException::class, 'a/./b');
+
+it('rejects a directory override containing a Windows-style traversal segment', function (): void {
+    new PhotoDefinition(directory: 'tenants\\..\\etc');
+})->throws(PhotoDefinitionException::class, 'tenants\..\etc');
+
+it('accepts a legitimate multi-segment directory override', function (): void {
+    expect((new PhotoDefinition(directory: 'tenants/acme'))->directory)->toBe('tenants/acme');
+});
