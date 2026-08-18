@@ -50,7 +50,7 @@ trait HasPhotos
                 return;
             }
 
-            $cleanup = static function () use ($model): void {
+            $model->eloquentPhotoDeferUntilCommitted(static function () use ($model): void {
                 foreach (array_keys($model->eloquentPhotoDefinitions()) as $field) {
                     try {
                         // Best-effort: the row is already gone by the time
@@ -65,32 +65,7 @@ trait HasPhotos
                         // Swallowed — see comment above.
                     }
                 }
-            };
-
-            $connection = $model->getConnection();
-
-            // `deleted` fires synchronously, before commit, but file I/O is
-            // not transactional: deleting the files immediately and then
-            // having the transaction roll back would restore the row while
-            // its files stay gone — a dead pointer, the same defect class
-            // updatePhoto()'s write-then-save-then-delete ordering exists to
-            // avoid, arriving through a different door. Deferring to
-            // afterCommit() means a rollback never runs the cleanup at all.
-            //
-            // getConnection() only returns ConnectionInterface, which declares
-            // transactionLevel() but not afterCommit() — that exists only on
-            // the concrete Connection class. A connection that isn't one (a
-            // custom or decorated implementation) falls through to immediate
-            // cleanup below and loses rollback protection. Every stock driver
-            // (MySQL, Postgres, SQLite, SQL Server) extends Connection, so
-            // this is a documented limitation, not a handled case.
-            if ($connection instanceof Connection && $connection->transactionLevel() > 0) {
-                $connection->afterCommit($cleanup);
-
-                return;
-            }
-
-            $cleanup();
+            });
         });
     }
 
@@ -143,6 +118,15 @@ trait HasPhotos
                 // Exception, not Throwable: a disk hiccup is swallowed, but an
                 // Error (TypeError, a programming fault) is not this catch's
                 // job to hide and must still crash.
+                //
+                // Not deferred via eloquentPhotoDeferUntilCommitted(), unlike
+                // the cleanups below: save() just failed, so nothing durable
+                // ever pointed at $newPath — no row, committed or not, can be
+                // holding a dead pointer to it. If a surrounding transaction
+                // is on its way to rolling back (the common reason save()
+                // throws), deferring this to afterCommit() would mean it
+                // never runs at all, permanently orphaning the file instead
+                // of cleaning it up now while nothing depends on the timing.
                 $this->eloquentPhotoFilesystem($field)->delete($newPath);
             } catch (Exception) {
                 // Swallowed — see comment above.
@@ -174,15 +158,23 @@ trait HasPhotos
         }
 
         if ($oldPath !== null && $oldPath !== $newPath) {
-            try {
-                // Best-effort: the save already succeeded, so a failure here
-                // must not turn a successful update into an error. It only
-                // leaves an orphaned file behind. Exception, not Throwable —
-                // see the comment in the catch block above.
-                $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
-            } catch (Exception) {
-                // Swallowed — see comment above.
-            }
+            // Deferred until commit when inside a transaction — see
+            // eloquentPhotoDeferUntilCommitted() — since the save() above
+            // just persisted the row pointing at $newPath, and deleting
+            // $oldPath immediately would leave that persisted-but-not-yet-
+            // committed row's old file gone if the transaction then rolls
+            // back and un-persists it, right back to needing $oldPath.
+            $this->eloquentPhotoDeferUntilCommitted(function () use ($field, $oldPath): void {
+                try {
+                    // Best-effort: the save already succeeded, so a failure
+                    // here must not turn a successful update into an error.
+                    // It only leaves an orphaned file behind. Exception, not
+                    // Throwable — see the comment in the catch block above.
+                    $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
+                } catch (Exception) {
+                    // Swallowed — see comment above.
+                }
+            });
         }
 
         return $this;
@@ -241,6 +233,14 @@ trait HasPhotos
      * column pointing at a file that no longer existed if the save then
      * failed — the same dead-pointer bug updatePhoto() exists to avoid.
      *
+     * The return value reflects whether there was a file recorded to delete,
+     * not whether the disk deletion itself has already happened: the cleanup
+     * is deferred until commit inside a transaction (see
+     * eloquentPhotoDeferUntilCommitted()), so its outcome is not known yet
+     * when this returns, and is best-effort either way — the same as
+     * updatePhoto()'s old-file cleanup, whose outcome was never reported to
+     * the caller at all.
+     *
      * Calls save(), so any other unsaved changes on the model are persisted
      * too.
      */
@@ -257,15 +257,30 @@ trait HasPhotos
         $this->setAttribute($field, null);
         $this->save();
 
-        try {
-            // Best-effort: the column is already cleared and saved, so a
-            // failure here must not turn a successful delete into an error.
-            // It only leaves an orphaned file behind. Exception, not
-            // Throwable — see the comment in updatePhoto()'s catch block.
-            return $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
-        } catch (Exception) {
+        if ($oldPath === null) {
+            // Tampered column: nothing safe to delete, same as
+            // eloquentPhotoDeleteFilesAt() reports on its own.
             return false;
         }
+
+        // Deferred until commit when inside a transaction: the save() above
+        // just persisted the cleared column, and deleting the file
+        // immediately would leave nothing to restore it to if the
+        // transaction then rolls back and un-persists that column change.
+        $this->eloquentPhotoDeferUntilCommitted(function () use ($field, $oldPath): void {
+            try {
+                // Best-effort: the column is already cleared and saved, so a
+                // failure here must not turn a successful delete into an
+                // error. It only leaves an orphaned file behind. Exception,
+                // not Throwable — see the comment in updatePhoto()'s catch
+                // block.
+                $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
+            } catch (Exception) {
+                // Swallowed — see comment above.
+            }
+        });
+
+        return true;
     }
 
     /**
@@ -532,5 +547,38 @@ trait HasPhotos
         $disk->deleteDirectory($this->eloquentPhotoPathGenerator()->conversionDirectory($primaryPath));
 
         return $deleted;
+    }
+
+    /**
+     * Runs $cleanup after the current transaction commits, or immediately if
+     * none is open. Shared by the delete-on-model-delete hook above and the
+     * old-file/cleared-file deletions in updatePhoto()/deletePhoto() below.
+     *
+     * Each of those fires synchronously — a `deleted` event, or straight
+     * after a save() — but file I/O is not transactional: deleting a file
+     * immediately and then having the caller's transaction roll back would
+     * leave a restored row pointing at a file that is already gone, a dead
+     * pointer of the same class updatePhoto()'s write-then-save-then-delete
+     * ordering exists to avoid, arriving through a different door. Deferring
+     * to afterCommit() means a rollback never runs the cleanup at all.
+     */
+    protected function eloquentPhotoDeferUntilCommitted(callable $cleanup): void
+    {
+        $connection = $this->getConnection();
+
+        // getConnection() only returns ConnectionInterface, which declares
+        // transactionLevel() but not afterCommit() — that exists only on the
+        // concrete Connection class. A connection that isn't one (a custom
+        // or decorated implementation) falls through to immediate cleanup
+        // below and loses rollback protection. Every stock driver (MySQL,
+        // Postgres, SQLite, SQL Server) extends Connection, so this is a
+        // documented limitation, not a handled case.
+        if ($connection instanceof Connection && $connection->transactionLevel() > 0) {
+            $connection->afterCommit($cleanup);
+
+            return;
+        }
+
+        $cleanup();
     }
 }

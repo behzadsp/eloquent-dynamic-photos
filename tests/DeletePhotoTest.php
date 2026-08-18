@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Fixtures;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Post;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function (): void {
@@ -103,4 +104,34 @@ it('lets a programming error from the file cleanup crash rather than swallowing 
 
     expect(fn () => $post->deletePhoto('photo'))
         ->toThrow(TypeError::class, 'a programming fault');
+});
+
+it('keeps the file intact when the deleting transaction rolls back', function (): void {
+    $post = postWithPhoto();
+    $path = deletablePath($post);
+
+    try {
+        DB::transaction(function () use ($post): void {
+            $post->deletePhoto('photo');
+
+            throw new RuntimeException('rolled back on purpose');
+        });
+    } catch (RuntimeException) {
+        // Expected — see above.
+    }
+
+    expect(freshPostOrFail($post)->photo)->toBe($path);
+    Storage::disk('photos')->assertExists($path);
+});
+
+it('clears the column and deletes the file once the deleting transaction commits', function (): void {
+    $post = postWithPhoto();
+    $path = deletablePath($post);
+
+    DB::transaction(function () use ($post): void {
+        $post->deletePhoto('photo');
+    });
+
+    expect(freshPostOrFail($post)->photo)->toBeNull();
+    Storage::disk('photos')->assertMissing($path);
 });

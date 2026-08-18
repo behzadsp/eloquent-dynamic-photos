@@ -6,6 +6,7 @@ use Behzadsp\EloquentDynamicPhotos\Exceptions\InvalidPhotoException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Fixtures;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Post;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function (): void {
@@ -159,4 +160,35 @@ it('lets a programming error from the old-file cleanup crash rather than swallow
 
     expect(fn () => $post->updatePhoto(Fixtures::png(), 'photo'))
         ->toThrow(TypeError::class, 'a programming fault');
+});
+
+it('keeps the original file when the updating transaction rolls back', function (): void {
+    $post = Post::create(['slug' => 'my-post']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+    $original = storedPath($post);
+
+    try {
+        DB::transaction(function () use ($post): void {
+            $post->updatePhoto(Fixtures::png(), 'photo');
+
+            throw new RuntimeException('rolled back on purpose');
+        });
+    } catch (RuntimeException) {
+        // Expected — see above.
+    }
+
+    expect(freshOrFail($post)->photo)->toBe($original);
+    Storage::disk('photos')->assertExists($original);
+});
+
+it('deletes the previous file once the updating transaction commits', function (): void {
+    $post = Post::create(['slug' => 'my-post']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+    $original = storedPath($post);
+
+    DB::transaction(function () use ($post): void {
+        $post->updatePhoto(Fixtures::png(), 'photo');
+    });
+
+    Storage::disk('photos')->assertMissing($original);
 });
