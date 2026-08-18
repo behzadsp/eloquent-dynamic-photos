@@ -374,8 +374,9 @@ trait HasPhotos
         // Gated on the declared fields, so a model with real website and
         // website_url columns is left alone.
         if (is_string($key) && str_ends_with($key, '_url')) {
-            // substr, not str_replace: str_replace('_url', '') turns
-            // "url_photo_url" into "_photo".
+            // substr, not str_replace: str_replace('_url', '') strips EVERY
+            // occurrence, so a declared field named "image_url" read as
+            // "image_url_url" would resolve to "image" and never be found.
             $field = substr($key, 0, -4);
 
             if ($field !== '' && array_key_exists($field, $this->eloquentPhotoDefinitions())) {
