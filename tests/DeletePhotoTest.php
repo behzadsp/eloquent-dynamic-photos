@@ -87,6 +87,11 @@ it('leaves the file and column alone when the save fails', function (): void {
 
         Storage::disk('photos')->assertExists($path);
         expect(freshPostOrFail($post)->photo)->toBe($path);
+        // The in-memory column must be restored too, not just the DB row:
+        // otherwise a caller that catches the exception and calls save()
+        // again would persist null without ever deleting the file, orphaning
+        // it. Mirrors updatePhoto()'s equivalent restoration on save failure.
+        expect($post->photo)->toBe($path);
     } finally {
         Post::flushEventListeners();
     }

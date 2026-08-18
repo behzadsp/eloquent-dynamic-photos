@@ -89,6 +89,35 @@ it('leaves the files alone when the config flag is off', function (): void {
     Storage::disk('photos')->assertExists($primary);
 });
 
+it('coerces an env()-shaped config value the same as every other boolean flag', function (bool|string $value, bool $expectDeleted): void {
+    // Every other boolean in PhotoDefinition goes through configBool(), which
+    // accepts env()-shaped strings since Laravel's env() leaves numeric/bool
+    // strings as strings. This flag has no PhotoDefinition property of its
+    // own (it is package-wide, not per-field) but must be coerced the same
+    // way — an inline `!== true` check would silently disable the whole
+    // hook for a config reading env('...', true), with no error.
+    config()->set('eloquent_photo.delete_files_on_model_delete', $value);
+
+    $post = Post::create(['slug' => 'a']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+    $primary = deletedPrimaryPath($post);
+
+    $post->delete();
+
+    if ($expectDeleted) {
+        Storage::disk('photos')->assertMissing($primary);
+    } else {
+        Storage::disk('photos')->assertExists($primary);
+    }
+})->with([
+    'string "true"' => ['true', true],
+    'string "1"' => ['1', true],
+    'string "false"' => ['false', false],
+    'string "0"' => ['0', false],
+    'bool true' => [true, true],
+    'bool false' => [false, false],
+]);
+
 it('does not fall over deleting a model with no photos stored', function (): void {
     Post::create(['slug' => 'a'])->delete();
 })->throwsNoExceptions();

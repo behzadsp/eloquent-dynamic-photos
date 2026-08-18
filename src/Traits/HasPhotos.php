@@ -39,7 +39,7 @@ trait HasPhotos
     public static function bootHasPhotos(): void
     {
         static::deleted(static function (self $model): void {
-            if (config('eloquent_photo.delete_files_on_model_delete') !== true) {
+            if (! PhotoDefinition::configBool('delete_files_on_model_delete')) {
                 return;
             }
 
@@ -255,7 +255,20 @@ trait HasPhotos
         $oldPath = $this->eloquentPhotoUsableRawPath($field);
 
         $this->setAttribute($field, null);
-        $this->save();
+
+        try {
+            $this->save();
+        } catch (Throwable $e) {
+            // Restore the in-memory column: without this, a caller that
+            // catches the exception is left with a model whose column
+            // already reads null even though nothing was persisted, and a
+            // later save() would clear the real column without ever
+            // deleting its files, orphaning them. Mirrors updatePhoto()'s
+            // catch block.
+            $this->setAttribute($field, $rawValue);
+
+            throw $e;
+        }
 
         if ($oldPath === null) {
             // Tampered column: nothing safe to delete, same as

@@ -249,7 +249,14 @@ final readonly class PhotoDefinition
         return null;
     }
 
-    private static function configBool(string $key): bool
+    /**
+     * Public: also used by HasPhotos::bootHasPhotos() to read
+     * delete_files_on_model_delete, a package-wide flag with no per-field
+     * override and so no PhotoDefinition property of its own — but which
+     * still needs the same env()-shaped-string coercion as every boolean
+     * here, not a separate inline check.
+     */
+    public static function configBool(string $key): bool
     {
         $value = self::config($key);
 
