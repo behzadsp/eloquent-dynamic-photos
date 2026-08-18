@@ -28,6 +28,11 @@ final class Fixtures
         return self::encode($width, $height, 'gif');
     }
 
+    public static function webp(int $width = 40, int $height = 30): string
+    {
+        return self::encode($width, $height, 'webp');
+    }
+
     private static function encode(int $width, int $height, string $format): string
     {
         return app(ImageManager::class)

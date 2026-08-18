@@ -11,6 +11,7 @@ use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Fixtures;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Intervention\Image\Drivers\Imagick\Driver as ImagickDriver;
 use Intervention\Image\Format;
 use Intervention\Image\ImageManager;
 use Intervention\Image\Interfaces\AnimationFactoryInterface;
@@ -67,6 +68,36 @@ function hugeAnimatedGif(): string
     static $bytes = null;
 
     return $bytes ??= animatedGif(100, 800, 800);
+}
+
+/**
+ * An N-frame solid-colour animated WebP, built directly with the imagick
+ * driver rather than through the app's configured one: GD's imagewebp()
+ * cannot write more than one frame regardless of config, so this fixture
+ * cannot depend on whatever driver a given test has bound.
+ */
+function animatedWebp(int $frames, int $width, int $height): string
+{
+    return ImageManager::usingDriver(ImagickDriver::class)
+        ->createImage($width, $height, function (AnimationFactoryInterface $animation) use ($frames): void {
+            for ($i = 0; $i < $frames; $i++) {
+                $animation->add($i % 2 === 0 ? '#ff0000' : '#00ff00', 0.04);
+            }
+        })
+        ->encode(Format::create('webp')->encoder(quality: 90))
+        ->toString();
+}
+
+/**
+ * 100 frames at 800x800, same shape as hugeAnimatedGif(): 640,000 pixels per
+ * frame but 64,000,000 once every frame counts. Built once and cached.
+ */
+function hugeAnimatedWebp(): string
+{
+    /** @var string|null $bytes */
+    static $bytes = null;
+
+    return $bytes ??= animatedWebp(100, 800, 800);
 }
 
 function storedImage(string $path): ImageInterface
@@ -215,6 +246,54 @@ it('leaves a static GIF unaffected by the pixel ceiling', function (): void {
 
     Storage::disk('photos')->assertExists('p/a.webp');
 });
+
+it('rejects an animated WebP whose total pixel budget exceeds the ceiling under the imagick driver', function (): void {
+    // GD flattens animation to one frame on encode (see the earlier GD-driver
+    // report), but Imagick's WebP encoder preserves it -- and both drivers
+    // must decode every frame to get there. getimagesize() still only reports
+    // frame one, so the same evasion the GIF fix closed exists for WebP too,
+    // gated on this config, which is supported and installed here.
+    config()->set('eloquent_photo.driver', 'imagick');
+    app()->forgetInstance(ImageManager::class);
+
+    processor()->storePrimary(hugeAnimatedWebp(), 'photos', 'p/a.webp', new PhotoDefinition);
+})->throws(InvalidPhotoException::class, '64000000')
+    ->skip(! extension_loaded('imagick'), 'ext-imagick is not installed');
+
+it('allows an animated WebP through when the pixel ceiling is high enough', function (): void {
+    config()->set('eloquent_photo.driver', 'imagick');
+    app()->forgetInstance(ImageManager::class);
+
+    $definition = new PhotoDefinition(maxPixels: 100_000_000);
+
+    processor()->storePrimary(hugeAnimatedWebp(), 'photos', 'p/a.webp', $definition);
+
+    Storage::disk('photos')->assertExists('p/a.webp');
+})->skip(! extension_loaded('imagick'), 'ext-imagick is not installed');
+
+it('does not treat a handful of animated WebP frames as an attack', function (): void {
+    config()->set('eloquent_photo.driver', 'imagick');
+    app()->forgetInstance(ImageManager::class);
+
+    processor()->storePrimary(animatedWebp(3, 100, 100), 'photos', 'p/a.webp', new PhotoDefinition);
+
+    Storage::disk('photos')->assertExists('p/a.webp');
+})->skip(! extension_loaded('imagick'), 'ext-imagick is not installed');
+
+it('leaves a static WebP unaffected by the pixel ceiling', function (): void {
+    processor()->storePrimary(Fixtures::webp(), 'photos', 'p/a.webp', new PhotoDefinition);
+
+    Storage::disk('photos')->assertExists('p/a.webp');
+});
+
+it('does not multiply a static WebP by a zero frame count', function (): void {
+    // A static WebP has zero ANMF chunks. If frameCount() returned that raw
+    // count instead of clamping to at least 1, the pixel budget would be
+    // width*height*0 = 0 and this would store instead of throwing.
+    $definition = new PhotoDefinition(maxPixels: 100 * 100 - 1);
+
+    processor()->storePrimary(Fixtures::webp(100, 100), 'photos', 'p/a.webp', $definition);
+})->throws(InvalidPhotoException::class, '10000 total pixels');
 
 it('rejects a path that does not exist', function (): void {
     // Pins existing behaviour: this already worked via the FilesystemException

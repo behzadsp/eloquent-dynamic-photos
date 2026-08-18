@@ -257,30 +257,39 @@ final class PhotoProcessor
     }
 
     /**
-     * GIF is the proven vector (intervention/gif, a hard dependency of
-     * intervention/image, decodes every frame; GD and Imagick both need the
-     * full bitmap before scaleDown() can shrink it). Frame count is read from
-     * the bytes rather than by decoding: each frame is preceded by a Graphic
-     * Control Extension block, whose introducer, label and block-size bytes
-     * are fixed by the GIF89a spec (0x21, 0xF9, 0x04), including for a
-     * single-frame GIF. Verified against real GD- and Imagick-encoded
-     * 100-frame GIFs (exact match) and a static one (1 marker).
+     * Predicting decode cost from bytes needs a predictor per container
+     * format, so this can never be exhaustive. It understands exactly two:
      *
-     * This is a marker count, not a full GIF parser: those three bytes could
-     * in principle recur inside compressed frame data. That only inflates the
-     * count, which is the safe direction for a guard whose job is to reject.
+     * - GIF: each frame is preceded by a Graphic Control Extension block,
+     *   whose introducer, label and block-size bytes are fixed by the GIF89a
+     *   spec (0x21, 0xF9, 0x04), including for a single-frame GIF. Verified
+     *   against real GD- and Imagick-encoded 100-frame GIFs (exact match) and
+     *   a static one (1 marker).
+     * - WebP: an animated WebP is a RIFF container whose frames are `ANMF`
+     *   chunks. Verified against a real Imagick-encoded 100-frame WebP (exact
+     *   match) and a static one (0 markers — hence max(1, ...) below, so a
+     *   static WebP is not multiplied by zero).
      *
-     * Other animated formats are not handled here: the reviewer's animated
-     * WebP did not reproduce the bomb on this driver, and this package does
-     * not touch APNG/animated AVIF today.
+     * Everything else — a static image in any format, or an animated format
+     * this method does not recognise — counts as one frame and relies on the
+     * byte-size guard and PHP's memory_limit as backstops. This is a marker
+     * count, not a full parser: those bytes could in principle recur inside
+     * compressed frame data, which only inflates the count — the safe
+     * direction for a guard whose job is to reject.
      */
     private function frameCount(string $bytes): int
     {
-        if (! str_starts_with($bytes, 'GIF87a') && ! str_starts_with($bytes, 'GIF89a')) {
-            return 1;
-        }
-
-        return max(1, substr_count($bytes, "\x21\xF9\x04"));
+        return match (true) {
+            str_starts_with($bytes, 'GIF87a'), str_starts_with($bytes, 'GIF89a') => max(
+                1,
+                substr_count($bytes, "\x21\xF9\x04")
+            ),
+            str_starts_with($bytes, 'RIFF') && substr($bytes, 8, 4) === 'WEBP' => max(
+                1,
+                substr_count($bytes, 'ANMF')
+            ),
+            default => 1,
+        };
     }
 
     /**
