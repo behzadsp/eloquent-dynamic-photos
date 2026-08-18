@@ -111,3 +111,34 @@ it('rejects a directory override containing a Windows-style traversal segment', 
 it('accepts a legitimate multi-segment directory override', function (): void {
     expect((new PhotoDefinition(directory: 'tenants/acme'))->directory)->toBe('tenants/acme');
 });
+
+it('rejects a directory override containing a null-byte-disguised traversal segment', function (): void {
+    new PhotoDefinition(directory: "tenants/..\0/etc");
+})->throws(PhotoDefinitionException::class);
+
+it('rejects a directory override that is entirely a null-byte-disguised traversal segment', function (): void {
+    new PhotoDefinition(directory: "..\0");
+})->throws(PhotoDefinitionException::class);
+
+it('rejects a conversion name containing a traversal segment', function (): void {
+    new PhotoDefinition(conversions: ['../../etc/passwd' => new Conversion(width: 10)]);
+})->throws(PhotoDefinitionException::class, '../../etc/passwd');
+
+it('rejects an integer conversion name key', function (): void {
+    // @phpstan-ignore argument.type (deliberately wrong key type, to exercise the runtime guard)
+    new PhotoDefinition(conversions: [0 => new Conversion(width: 10)]);
+})->throws(PhotoDefinitionException::class, 'must be a string');
+
+it('accepts a legitimate conversion name', function (string $name): void {
+    $definition = new PhotoDefinition(conversions: [$name => new Conversion(width: 10)]);
+
+    expect($definition->conversion($name))->toBeInstanceOf(Conversion::class);
+})->with(['thumb', 'hero-2x']);
+
+it('rejects an unsafe format', function (): void {
+    new PhotoDefinition(format: '../../etc/passwd');
+})->throws(PhotoDefinitionException::class, '../../etc/passwd');
+
+it('accepts a legitimate format', function (string $format): void {
+    expect((new PhotoDefinition(format: $format))->format)->toBe($format);
+})->with(['webp', 'jpeg']);

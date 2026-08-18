@@ -32,3 +32,7 @@ it('accepts cover when both axes are given', function (): void {
     expect($conversion->format)->toBe('jpeg');
     expect($conversion->quality)->toBe(60);
 });
+
+it('rejects an unsafe format override', function (): void {
+    new Conversion(width: 100, format: '../x');
+})->throws(PhotoDefinitionException::class, '../x');

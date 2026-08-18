@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Behzadsp\EloquentDynamicPhotos;
 
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
+use Behzadsp\EloquentDynamicPhotos\Traits\ValidatesPathTokens;
 
 /**
  * Per-field photo configuration. Any argument left null falls back to the
@@ -12,6 +13,8 @@ use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
  */
 final readonly class PhotoDefinition
 {
+    use ValidatesPathTokens;
+
     public string $disk;
 
     /**
@@ -80,6 +83,7 @@ final readonly class PhotoDefinition
         $this->nameAttribute = $nameAttribute ?? self::configString('name_attribute');
         $this->nameLimit = $nameLimit ?? self::configInt('name_limit');
         $this->format = $format ?? self::configString('format');
+        self::assertPathToken($this->format, 'Format', '/^[A-Za-z0-9]+$/');
         $this->quality = $quality ?? self::configInt('quality');
         $this->timestampFormat = $timestampFormat ?? self::configString('timestamp_format');
         $this->maxFileSize = $maxFileSize ?? self::configInt('max_file_size');
@@ -96,10 +100,25 @@ final readonly class PhotoDefinition
         $this->allowedMimeTypes = $allowedMimeTypes ?? self::configStringList('allowed_mime_types');
 
         foreach ($conversions as $name => $conversion) {
+            // Conversion names are developer-chosen labels that reach
+            // PathGenerator::conversionPath() unsanitized, so they get the same
+            // strict allowlist as format strings. An integer key (an accidental
+            // numeric-string key, which PHP casts to int on its own) is rejected
+            // outright rather than stringified and pattern-checked.
+            if (! is_string($name)) {
+                throw new PhotoDefinitionException(sprintf(
+                    'Conversion name [%s] must be a string, %s given.',
+                    (string) $name,
+                    get_debug_type($name)
+                ));
+            }
+
+            self::assertPathToken($name, 'Conversion name', '/^[A-Za-z0-9_-]+$/');
+
             if (! $conversion instanceof Conversion) {
                 throw new PhotoDefinitionException(sprintf(
                     'Conversion [%s] must be a Conversion instance, %s given.',
-                    (string) $name,
+                    $name,
                     get_debug_type($conversion)
                 ));
             }
@@ -130,7 +149,10 @@ final readonly class PhotoDefinition
      */
     private static function assertSafeDirectory(string $directory): void
     {
-        if (str_contains($directory, '\\')) {
+        // A null byte defeats the exact "." / ".." segment comparison below
+        // ("..\0" !== ".."), so it is rejected up front rather than folded
+        // into the segment loop.
+        if (str_contains($directory, '\\') || str_contains($directory, "\0")) {
             throw new PhotoDefinitionException(self::unsafeDirectoryError($directory));
         }
 
@@ -144,7 +166,7 @@ final readonly class PhotoDefinition
     private static function unsafeDirectoryError(string $directory): string
     {
         return sprintf(
-            'Directory [%s] must not contain ".", ".." or backslash segments.',
+            'Directory [%s] must not contain ".", "..", a null byte or backslash segments.',
             $directory
         );
     }

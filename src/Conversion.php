@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Behzadsp\EloquentDynamicPhotos;
 
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
+use Behzadsp\EloquentDynamicPhotos\Traits\ValidatesPathTokens;
 
 final readonly class Conversion
 {
+    use ValidatesPathTokens;
+
     /**
      * @param  int|null  $width  Target width. Null means "derive from height".
      * @param  int|null  $height  Target height. Null means "derive from width".
@@ -25,6 +28,10 @@ final readonly class Conversion
             throw new PhotoDefinitionException(
                 'A conversion needs a width, a height, or both.'
             );
+        }
+
+        if ($format !== null) {
+            self::assertPathToken($format, 'Format', '/^[A-Za-z0-9]+$/');
         }
 
         // Intervention's cover() and resize() both take two required dimensions.
