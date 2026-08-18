@@ -1,180 +1,158 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Behzadsp\EloquentDynamicPhotos\Traits;
 
-use Carbon\Carbon;
+use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
+use Behzadsp\EloquentDynamicPhotos\Exceptions\UnsupportedDiskOperation;
+use Behzadsp\EloquentDynamicPhotos\PathGenerator;
+use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
+use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
-use Intervention\Image\Facades\Image;
 
+/**
+ * @mixin Model
+ */
 trait HasPhotos
 {
-    public function deletePhotoFile(string $photoField): bool
-    {
-        if ($this->$photoField) {
-            Storage::disk($this->getEloquentPhotoDisk())->delete(
-                $this->$photoField,
-            );
+    /** @var array<string, PhotoDefinition>|null */
+    private ?array $eloquentPhotoDefinitionsCache = null;
 
-            return true;
+    /**
+     * Declare which columns hold photos, and how each one is handled.
+     *
+     * Override this in the model. Keys are column names.
+     *
+     * @return array<string, PhotoDefinition>
+     */
+    protected function photoDefinitions(): array
+    {
+        return [];
+    }
+
+    public function photoPath(string $field, ?string $conversion = null): ?string
+    {
+        $definition = $this->eloquentPhotoDefinition($field);
+        $primary = $this->eloquentPhotoRawPath($field);
+
+        if ($primary === null) {
+            return null;
         }
 
-        return false;
-    }
-
-    public function updatePhoto($photo, string $photoField): Model
-    {
-        $this->deletePhotoFile($photoField);
-
-        if (
-            ! Storage::disk($this->getEloquentPhotoDisk())->exists(
-                $this->getEloquentPhotoRootDirectory().
-                    '/'.
-                    $this->getDirName(),
-            )
-        ) {
-            Storage::disk($this->getEloquentPhotoDisk())->makeDirectory(
-                $this->getEloquentPhotoRootDirectory().
-                    '/'.
-                    $this->getDirName(),
-            );
+        if ($conversion === null) {
+            return $primary;
         }
 
-        $photoPath = $this->getPhotoDirectoryPath();
+        $format = $definition->conversion($conversion)->format ?? $definition->format;
 
-        $image = Image::make($photo)
-            ->encode(
-                $this->getEloquentPhotoFormat(),
-                $this->getEloquentPhotoQuality()
-            );
-
-        Storage::disk($this->getEloquentPhotoDisk())
-            ->put($photoPath, $image->stream($this->getEloquentPhotoFormat(), $this->getEloquentPhotoQuality()));
-
-        $this->$photoField = $photoPath;
-
-        $this->saveOrFail();
-
-        return $this;
+        return $this->eloquentPhotoPathGenerator()->conversionPath($primary, $conversion, $format);
     }
 
-    public function getPhotoFullPath(string $photoPath)
+    public function photoUrl(string $field, ?string $conversion = null): ?string
     {
-        return Storage::disk($this->getEloquentPhotoDisk())->path($photoPath);
+        $path = $this->photoPath($field, $conversion);
+
+        if ($path === null) {
+            return null;
+        }
+
+        return $this->eloquentPhotoDisk($field)->url($path);
     }
 
-    public function getPhotoDirectoryPath()
+    public function photoFullPath(string $field, ?string $conversion = null): ?string
     {
-        return $this->getEloquentPhotoRootDirectory().
-            '/'.
-            $this->getDirName().
-            '/'.
-            $this->getFileName().
-            '.'.
-            $this->getEloquentPhotoFormat();
+        $path = $this->photoPath($field, $conversion);
+
+        if ($path === null) {
+            return null;
+        }
+
+        $disk = $this->eloquentPhotoDefinition($field)->disk;
+        $driver = config('filesystems.disks.'.$disk.'.driver');
+
+        // Checked against the configured driver, not method_exists($disk, 'path'):
+        // path() is declared on FilesystemAdapter and inherited by every driver
+        // including S3, so the method always exists. On a remote disk it returns a
+        // prefixed object key rather than a filesystem path, which is what v1
+        // handed back to callers as though it were one.
+        if ($driver !== 'local') {
+            throw new UnsupportedDiskOperation(sprintf(
+                'Disk [%s] uses the [%s] driver, so it has no local filesystem path. Use photoUrl() instead.',
+                $disk,
+                is_string($driver) ? $driver : get_debug_type($driver)
+            ));
+        }
+
+        return $this->eloquentPhotoDisk($field)->path($path);
     }
 
-    public function getFileName()
+    /**
+     * @param  string  $key
+     */
+    public function getAttribute($key): mixed
     {
-        $nameAttribute = $this->getEloquentPhotoNameAttribute();
+        // Gated on the declared fields, so a model with real website and
+        // website_url columns is left alone.
+        if (is_string($key) && str_ends_with($key, '_url')) {
+            // substr, not str_replace: str_replace('_url', '') turns
+            // "url_photo_url" into "_photo".
+            $field = substr($key, 0, -4);
 
-        return str($this->$nameAttribute)
-            ->limit($this->getEloquentPhotoSlugLimit())
-            ->toString().
-            '_'.
-            Str::random(5).
-            '_'.
-            Carbon::now()->format($this->getEloquentPhotoTimestampFormat());
-    }
-
-    public function getDirName(): string
-    {
-        return str(class_basename($this))
-            ->plural()
-            ->lower()
-            ->toString();
-    }
-
-    public function getAttribute($key)
-    {
-        if (str_ends_with($key, '_url')) {
-            $photoField = str_replace('_url', '', $key);
-
-            if (array_key_exists($photoField, $this->attributes)) {
-                if ($this->attributes[$photoField] === null) {
-                    return null;
-                }
-
-                return Storage::disk($this->getEloquentPhotoDisk())->url(
-                    $this->attributes[$photoField],
-                );
+            if ($field !== '' && array_key_exists($field, $this->eloquentPhotoDefinitions())) {
+                return $this->photoUrl($field);
             }
         }
 
         return parent::getAttribute($key);
     }
 
-    protected function getEloquentPhotoDisk(): string
+    /**
+     * @return array<string, PhotoDefinition>
+     */
+    protected function eloquentPhotoDefinitions(): array
     {
-        if (method_exists($this, 'eloquentPhotoDisk')) {
-            return $this->eloquentPhotoDisk();
-        }
-
-        return config('eloquent_photo.disk');
+        return $this->eloquentPhotoDefinitionsCache ??= $this->photoDefinitions();
     }
 
-    protected function getEloquentPhotoRootDirectory(): string
+    protected function eloquentPhotoDefinition(string $field): PhotoDefinition
     {
-        if (method_exists($this, 'eloquentPhotoRootDirectory')) {
-            return $this->eloquentPhotoRootDirectory();
-        }
+        $definitions = $this->eloquentPhotoDefinitions();
 
-        return config('eloquent_photo.root_directory');
+        return $definitions[$field]
+            ?? throw new PhotoDefinitionException(sprintf(
+                'Field [%s] is not declared as a photo on %s. Declared: %s.',
+                $field,
+                static::class,
+                $definitions === [] ? 'none' : implode(', ', array_keys($definitions))
+            ));
     }
 
-    protected function getEloquentPhotoFormat(): string
+    /**
+     * The raw column value, read straight off the attribute array so the _url
+     * accessor above cannot recurse into it.
+     */
+    protected function eloquentPhotoRawPath(string $field): ?string
     {
-        if (method_exists($this, 'eloquentPhotoFormat')) {
-            return $this->eloquentPhotoFormat();
-        }
+        $value = $this->attributes[$field] ?? null;
 
-        return config('eloquent_photo.format');
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
-    protected function getEloquentPhotoQuality(): string
+    protected function eloquentPhotoDisk(string $field): Filesystem
     {
-        if (method_exists($this, 'eloquentPhotoQuality')) {
-            return $this->eloquentPhotoQuality();
-        }
-
-        return config('eloquent_photo.quality');
+        return Storage::disk($this->eloquentPhotoDefinition($field)->disk);
     }
 
-    protected function getEloquentPhotoNameAttribute(): string
+    protected function eloquentPhotoPathGenerator(): PathGenerator
     {
-        if (method_exists($this, 'eloquentPhotoNameAttribute')) {
-            return $this->eloquentPhotoNameAttribute();
-        }
-
-        return config('eloquent_photo.name_attribute');
+        return app(PathGenerator::class);
     }
 
-    protected function getEloquentPhotoSlugLimit(): string
+    protected function eloquentPhotoProcessor(): PhotoProcessor
     {
-        if (method_exists($this, 'eloquentPhotoSlugLimit')) {
-            return $this->eloquentPhotoSlugLimit();
-        }
-
-        return config('eloquent_photo.slug_limit');
-    }
-
-    protected function getEloquentPhotoTimestampFormat(): string
-    {
-        if (method_exists($this, 'eloquentPhotoTimestampFormat')) {
-            return $this->eloquentTimestampFormat();
-        }
-
-        return config('eloquent_photo.timestamp_format');
+        return app(PhotoProcessor::class);
     }
 }

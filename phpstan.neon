@@ -7,14 +7,3 @@ parameters:
         - src
         - tests
     treatPhpDocTypesAsCertain: false
-
-    # Transient: the trait has no consumer inside the repo until Task 7 wires it
-    # onto the test-support models. Once it does, phpstan analyses the trait body
-    # in those classes' context and this ignore stops matching — phpstan then
-    # reports the unmatched ignore as an error, which is the signal to delete
-    # these four lines. Do not make it permanent: that would leave the package's
-    # core file untypechecked behind a green check.
-    ignoreErrors:
-        -
-            identifier: trait.unused
-            path: src/Traits/HasPhotos.php
