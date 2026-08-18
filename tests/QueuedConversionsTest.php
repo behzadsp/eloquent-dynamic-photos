@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\Jobs\ProcessConversionsJob;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Fixtures;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Post;
+use Behzadsp\EloquentDynamicPhotos\Tests\Support\SoftPost;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 
@@ -38,15 +41,16 @@ function queuedPrimaryPath(Post $post): string
 /**
  * getKey() is declared to return mixed, but ProcessConversionsJob needs an
  * int|string identifier. Every model here has an auto-incrementing integer
- * primary key, so this narrows rather than trusts a cast.
+ * primary key, so this narrows rather than trusts a cast. Takes any Model
+ * (not just Post) since it is also used with SoftPost below.
  */
-function queuedModelKey(Post $post): int|string
+function queuedModelKey(Model $model): int|string
 {
-    $key = $post->getKey();
+    $key = $model->getKey();
 
     return is_int($key) || is_string($key)
         ? $key
-        : throw new RuntimeException('Expected the post to have an int or string key.');
+        : throw new RuntimeException('Expected the model to have an int or string key.');
 }
 
 it('generates conversions inline when queueing is off', function (): void {
@@ -145,4 +149,18 @@ it('lets regeneratePhotoConversions still regenerate unconditionally, regardless
     $post->regeneratePhotoConversions('photo');
 
     Storage::disk('photos')->assertExists($thumb);
+});
+
+it('throws when dispatched for a model class that does not use HasPhotos', function (): void {
+    // The column must match $dispatchedPath, or the superseded-upload check
+    // above would return quietly first and this would never reach the
+    // method_exists() check this test is for.
+    $softPost = SoftPost::create(['slug' => 'a', 'photo' => 'irrelevant.webp']);
+
+    expect(fn () => (new ProcessConversionsJob(
+        SoftPost::class,
+        queuedModelKey($softPost),
+        'photo',
+        'irrelevant.webp'
+    ))->handle())->toThrow(PhotoDefinitionException::class);
 });

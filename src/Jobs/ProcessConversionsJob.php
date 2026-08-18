@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Behzadsp\EloquentDynamicPhotos\Jobs;
 
+use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Model;
@@ -57,7 +58,18 @@ final class ProcessConversionsJob implements ShouldQueue
             return;
         }
 
-        // @phpstan-ignore method.notFound (the model uses HasPhotos, which the class-string cannot express)
+        if (! method_exists($model, 'regeneratePhotoConversions')) {
+            // A model class that doesn't use HasPhotos was dispatched here —
+            // a programming error (wrong $modelClass), not a race any caller
+            // can hit legitimately, so this throws rather than returning
+            // quietly like the two checks above.
+            throw new PhotoDefinitionException(sprintf(
+                '%s does not use the HasPhotos trait, so its [%s] conversions cannot be regenerated.',
+                $this->modelClass,
+                $this->field
+            ));
+        }
+
         $model->regeneratePhotoConversions($this->field);
     }
 }
