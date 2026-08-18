@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Behzadsp\EloquentDynamicPhotos\Traits;
 
+use Behzadsp\EloquentDynamicPhotos\Exceptions\InvalidPhotoException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\UnsupportedDiskOperation;
 use Behzadsp\EloquentDynamicPhotos\PathGenerator;
@@ -11,7 +12,9 @@ use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
 use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Storage;
+use League\Flysystem\Local\LocalFilesystemAdapter;
 
 /**
  * @mixin Model
@@ -70,23 +73,26 @@ trait HasPhotos
             return null;
         }
 
-        $disk = $this->eloquentPhotoDefinition($field)->disk;
-        $driver = config('filesystems.disks.'.$disk.'.driver');
+        $disk = $this->eloquentPhotoDisk($field);
 
-        // Checked against the configured driver, not method_exists($disk, 'path'):
-        // path() is declared on FilesystemAdapter and inherited by every driver
-        // including S3, so the method always exists. On a remote disk it returns a
-        // prefixed object key rather than a filesystem path, which is what v1
-        // handed back to callers as though it were one.
-        if ($driver !== 'local') {
+        // Introspect the resolved adapter rather than a "driver" key read from
+        // config: Storage::fake() swaps in a LocalFilesystemAdapter directly
+        // (Storage::set()) without ever writing that key back into
+        // filesystems.disks config, so a config-based check throws on a disk
+        // that is genuinely local — inside exactly the faked-storage tests a
+        // consuming app would write. This works for both a real local disk and
+        // a faked one, and still refuses S3 (a different Flysystem adapter
+        // class), without depending on method_exists($disk, 'path') — that is
+        // declared on FilesystemAdapter and inherited by every driver
+        // including S3, so it is true for every disk and proves nothing.
+        if (! $disk instanceof FilesystemAdapter || ! $disk->getAdapter() instanceof LocalFilesystemAdapter) {
             throw new UnsupportedDiskOperation(sprintf(
-                'Disk [%s] uses the [%s] driver, so it has no local filesystem path. Use photoUrl() instead.',
-                $disk,
-                is_string($driver) ? $driver : get_debug_type($driver)
+                'Disk [%s] is not a local filesystem, so it has no filesystem path. Use photoUrl() instead.',
+                $this->eloquentPhotoDefinition($field)->disk
             ));
         }
 
-        return $this->eloquentPhotoDisk($field)->path($path);
+        return $disk->path($path);
     }
 
     /**
@@ -133,12 +139,48 @@ trait HasPhotos
     /**
      * The raw column value, read straight off the attribute array so the _url
      * accessor above cannot recurse into it.
+     *
+     * PathGenerator never writes a ".." segment or a null byte into a stored
+     * path — names are slugified and directories are validated at
+     * declaration time — so a stored value containing either has been
+     * tampered with from outside this package (most plausibly a
+     * mass-assigned column, since $guarded = [] is a common setup on models
+     * using this trait). path() on the local disk concatenates without
+     * normalising and Flysystem's traversal guard only fires on real I/O, so
+     * left unchecked this could resolve to a path outside the disk's root;
+     * this fails loudly instead.
      */
     protected function eloquentPhotoRawPath(string $field): ?string
     {
         $value = $this->attributes[$field] ?? null;
 
-        return is_string($value) && $value !== '' ? $value : null;
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        // A null byte defeats the exact ".." segment comparison below
+        // ("..\0" !== ".."), so it is rejected up front rather than folded
+        // into the segment loop.
+        if (str_contains($value, "\0")) {
+            throw new InvalidPhotoException(sprintf(
+                'The [%s] column on %s contains a null byte and cannot be used as a path.',
+                $field,
+                static::class
+            ));
+        }
+
+        foreach (explode('/', $value) as $segment) {
+            if ($segment === '..') {
+                throw new InvalidPhotoException(sprintf(
+                    'The [%s] column on %s contains a ".." path segment: [%s].',
+                    $field,
+                    static::class,
+                    $value
+                ));
+            }
+        }
+
+        return $value;
     }
 
     protected function eloquentPhotoDisk(string $field): Filesystem
