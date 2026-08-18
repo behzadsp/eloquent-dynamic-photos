@@ -8,6 +8,7 @@ use Behzadsp\EloquentDynamicPhotos\Conversion;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\InvalidPhotoException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\Exceptions\UnsupportedDiskOperation;
+use Behzadsp\EloquentDynamicPhotos\Jobs\ProcessConversionsJob;
 use Behzadsp\EloquentDynamicPhotos\PathGenerator;
 use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
 use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
@@ -15,6 +16,7 @@ use Exception;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\Local\LocalFilesystemAdapter;
 use Throwable;
@@ -91,8 +93,20 @@ trait HasPhotos
         // pointing at a conversion that silently doesn't exist, which is a
         // worse failure mode than a thrown exception the caller can see and
         // act on (including by calling regeneratePhotoConversions() again
-        // later, since it's idempotent).
-        $this->regeneratePhotoConversions($field);
+        // later, since it's idempotent). Queueing only defers *when* that
+        // guarantee is met, not whether it applies: it still holds by the
+        // time the job runs, just against a worker instead of the uploader.
+        if ($definition->conversions !== []) {
+            if ($definition->queueConversions) {
+                $job = new ProcessConversionsJob(static::class, $this->eloquentPhotoModelKey(), $field);
+                $job->onConnection($this->eloquentPhotoQueueSetting('connection'))
+                    ->onQueue($this->eloquentPhotoQueueSetting('name'));
+
+                Bus::dispatch($job);
+            } else {
+                $this->regeneratePhotoConversions($field);
+            }
+        }
 
         if ($oldPath !== null && $oldPath !== $newPath) {
             try {
@@ -392,6 +406,40 @@ trait HasPhotos
     private function eloquentConversionFormat(PhotoDefinition $definition, Conversion $conversion): string
     {
         return $conversion->format ?? $definition->format;
+    }
+
+    /**
+     * An empty string from config (e.g. an unset env() default) must mean
+     * "use the app default" the same as a literal null, since onConnection()/
+     * onQueue() treat null that way but would otherwise pass "" straight
+     * through as a real connection or queue name.
+     */
+    private function eloquentPhotoQueueSetting(string $key): ?string
+    {
+        $value = config('eloquent_photo.queue.'.$key);
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * Model::getKey() is declared to return mixed, but ProcessConversionsJob
+     * needs a real identifier it can hand back into find(). Every primary key
+     * Eloquent supports natively is an int or a string, so anything else means
+     * the model overrides getKey() in a way this package cannot round-trip.
+     */
+    private function eloquentPhotoModelKey(): int|string
+    {
+        $key = $this->getKey();
+
+        if (! is_int($key) && ! is_string($key)) {
+            throw new PhotoDefinitionException(sprintf(
+                'The primary key on %s must be an int or a string to queue conversions, %s given.',
+                static::class,
+                get_debug_type($key)
+            ));
+        }
+
+        return $key;
     }
 
     /**
