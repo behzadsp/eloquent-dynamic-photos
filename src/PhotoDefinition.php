@@ -1,0 +1,207 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Behzadsp\EloquentDynamicPhotos;
+
+use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
+
+/**
+ * Per-field photo configuration. Any argument left null falls back to the
+ * matching key in config/eloquent_photo.php.
+ */
+final readonly class PhotoDefinition
+{
+    public string $disk;
+
+    /**
+     * Raw directory override. Null means "derive it", which PathGenerator does
+     * by joining the configured root with the model's own directory.
+     */
+    public ?string $directory;
+
+    public string $nameAttribute;
+
+    public int $nameLimit;
+
+    public string $format;
+
+    public int $quality;
+
+    public string $timestampFormat;
+
+    /** @var array<string, Conversion> */
+    public array $conversions;
+
+    public int $maxFileSize;
+
+    public ?int $maxWidth;
+
+    public ?int $maxHeight;
+
+    /** @var list<string> */
+    public array $allowedMimeTypes;
+
+    public bool $autoOrient;
+
+    public bool $queueConversions;
+
+    /**
+     * @param  array<string, Conversion>  $conversions
+     * @param  list<string>|null  $allowedMimeTypes
+     */
+    public function __construct(
+        ?string $disk = null,
+        ?string $directory = null,
+        ?string $nameAttribute = null,
+        ?int $nameLimit = null,
+        ?string $format = null,
+        ?int $quality = null,
+        ?string $timestampFormat = null,
+        array $conversions = [],
+        ?int $maxFileSize = null,
+        ?int $maxWidth = null,
+        ?int $maxHeight = null,
+        ?array $allowedMimeTypes = null,
+        ?bool $autoOrient = null,
+        ?bool $queueConversions = null,
+    ) {
+        // ponytail: reads config() directly rather than taking an injected defaults
+        // array. It keeps all fourteen fallbacks in one place and leaves every
+        // consumer free of null checks, and every test here already needs a booted
+        // app for Storage::fake(). Inject a defaults array if that ever stops being
+        // true.
+        $this->disk = $disk ?? self::configString('disk');
+        $this->directory = $directory;
+        $this->nameAttribute = $nameAttribute ?? self::configString('name_attribute');
+        $this->nameLimit = $nameLimit ?? self::configInt('name_limit');
+        $this->format = $format ?? self::configString('format');
+        $this->quality = $quality ?? self::configInt('quality');
+        $this->timestampFormat = $timestampFormat ?? self::configString('timestamp_format');
+        $this->maxFileSize = $maxFileSize ?? self::configInt('max_file_size');
+        $this->autoOrient = $autoOrient ?? self::configBool('auto_orient');
+        $this->queueConversions = $queueConversions ?? self::configBool('queue_conversions');
+
+        // maxWidth and maxHeight are legitimately nullable — null disables that
+        // axis — so they cannot use ?? against config and still allow an explicit
+        // null. Passing null here means "use the configured value"; set the config
+        // key to null to disable the bound globally.
+        $this->maxWidth = $maxWidth ?? self::configNullableInt('max_width');
+        $this->maxHeight = $maxHeight ?? self::configNullableInt('max_height');
+
+        $this->allowedMimeTypes = $allowedMimeTypes ?? self::configStringList('allowed_mime_types');
+
+        foreach ($conversions as $name => $conversion) {
+            if (! $conversion instanceof Conversion) {
+                throw new PhotoDefinitionException(sprintf(
+                    'Conversion [%s] must be a Conversion instance, %s given.',
+                    (string) $name,
+                    get_debug_type($conversion)
+                ));
+            }
+        }
+
+        $this->conversions = $conversions;
+    }
+
+    public function conversion(string $name): Conversion
+    {
+        return $this->conversions[$name]
+            ?? throw new PhotoDefinitionException(sprintf(
+                'No conversion named [%s]. Declared: %s.',
+                $name,
+                $this->conversions === [] ? 'none' : implode(', ', array_keys($this->conversions))
+            ));
+    }
+
+    private static function config(string $key): mixed
+    {
+        return config('eloquent_photo.'.$key);
+    }
+
+    // The five helpers below exist only to narrow config()'s mixed return to the
+    // property's real type, so phpstan can verify the assignment above instead
+    // of trusting a cast. Config misconfiguration (wrong type in
+    // eloquent_photo.php) throws the same exception as any other definition
+    // error rather than silently coercing bad data.
+
+    private static function configString(string $key): string
+    {
+        $value = self::config($key);
+
+        if (! is_string($value)) {
+            throw new PhotoDefinitionException(self::configTypeError($key, 'a string', $value));
+        }
+
+        return $value;
+    }
+
+    private static function configInt(string $key): int
+    {
+        $value = self::config($key);
+
+        if (! is_int($value)) {
+            throw new PhotoDefinitionException(self::configTypeError($key, 'an integer', $value));
+        }
+
+        return $value;
+    }
+
+    private static function configNullableInt(string $key): ?int
+    {
+        $value = self::config($key);
+
+        if ($value === null) {
+            return null;
+        }
+
+        if (! is_int($value)) {
+            throw new PhotoDefinitionException(self::configTypeError($key, 'an integer or null', $value));
+        }
+
+        return $value;
+    }
+
+    private static function configBool(string $key): bool
+    {
+        $value = self::config($key);
+
+        if (! is_bool($value)) {
+            throw new PhotoDefinitionException(self::configTypeError($key, 'a boolean', $value));
+        }
+
+        return $value;
+    }
+
+    /** @return list<string> */
+    private static function configStringList(string $key): array
+    {
+        $value = self::config($key);
+
+        if (! is_array($value)) {
+            throw new PhotoDefinitionException(self::configTypeError($key, 'an array', $value));
+        }
+
+        $strings = [];
+
+        foreach ($value as $item) {
+            if (! is_string($item)) {
+                throw new PhotoDefinitionException(self::configTypeError($key, 'an array of strings', $item));
+            }
+
+            $strings[] = $item;
+        }
+
+        return $strings;
+    }
+
+    private static function configTypeError(string $key, string $expected, mixed $value): string
+    {
+        return sprintf(
+            'Config key [eloquent_photo.%s] must be %s, %s given.',
+            $key,
+            $expected,
+            get_debug_type($value)
+        );
+    }
+}
