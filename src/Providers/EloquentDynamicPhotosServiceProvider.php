@@ -6,7 +6,9 @@ namespace Behzadsp\EloquentDynamicPhotos\Providers;
 
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\PathGenerator;
+use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Intervention\Image\Drivers\Gd\Driver as GdDriver;
@@ -46,6 +48,13 @@ class EloquentDynamicPhotosServiceProvider extends ServiceProvider
             $directory = $app->make(ConfigRepository::class)->get('eloquent_photo.directory');
 
             return new PathGenerator(is_string($directory) ? $directory : '');
+        });
+
+        $this->app->singleton(PhotoProcessor::class, static function (Application $app): PhotoProcessor {
+            return new PhotoProcessor(
+                $app->make(ImageManager::class),
+                $app->make(FilesystemFactory::class),
+            );
         });
     }
 
