@@ -175,8 +175,8 @@ stores no separate conversion columns and needs no migration. This has a consequ
 | Method | Behaviour |
 |---|---|
 | `updatePhoto(mixed $photo, string $field): static` | Validate, encode, store the primary, `save()`, generate/queue conversions, then delete the old file(s). |
-| `deletePhoto(string $field): bool` | Clear the column, `save()`, then delete the file(s). Returns whether the primary file was actually deleted. |
-| `deletePhotoFiles(string $field): bool` | Delete the file(s), leave the column as it is. Returns the filesystem's own boolean for whether the primary was actually deleted — see [CHANGELOG.md](CHANGELOG.md) for why that matters. |
+| `deletePhoto(string $field): bool` | Clear the column, `save()`, then delete the file(s) — deferred until the enclosing transaction commits, if there is one, so a rollback doesn't leave the file gone while the column is restored. Returns whether there was a photo recorded to delete, not whether the disk deletion has actually happened yet: `false` means the column was already empty or unusable, `true` means the column was cleared and cleanup was scheduled (or run immediately, best-effort, outside a transaction). |
+| `deletePhotoFiles(string $field): bool` | Delete the file(s), leave the column as it is. The boolean reflects only the primary file's own delete outcome — `false` also covers "there was nothing recorded to delete" (an empty or tampered column), not just a failed disk operation. The conversions directory is deleted alongside it, but that outcome isn't reflected in the return value at all. |
 | `photoUrl(string $field, ?string $conversion = null): ?string` | Public URL, or `null` if the column is empty. |
 | `photoPath(string $field, ?string $conversion = null): ?string` | Disk-relative path, or `null` if the column is empty. |
 | `photoFullPath(string $field, ?string $conversion = null): ?string` | Absolute local filesystem path. Throws `UnsupportedDiskOperation` if the field's disk isn't a local filesystem (S3, etc. — there is no local path to give you). |
@@ -190,8 +190,13 @@ field that isn't a key in `photoDefinitions()` throws the same exception.
 
 All exceptions this package throws extend `Behzadsp\EloquentDynamicPhotos\Exceptions\EloquentPhotoException`
 (itself a `RuntimeException`), so you can catch one type if you want. The others are
-`InvalidPhotoException` (bad/oversized/disallowed source) and `UnsupportedDiskOperation`
-(`photoFullPath()` on a non-local disk).
+`InvalidPhotoException` (bad/oversized/disallowed source), `UnsupportedDiskOperation`
+(`photoFullPath()` on a non-local disk), and `StorageFailedException` — raised when the disk
+itself rejects a write. `Storage::put()` returns `false` rather than throwing unless a disk
+opts into exceptions, which Laravel's default filesystem config does not, so without this
+check a rejected write would otherwise be silent: the column gets saved pointing at a path
+with no file behind it, and no error at all. This applies to both the primary write and every
+conversion write.
 
 ### The `{field}_url` accessor is not `$appends`-compatible
 
@@ -303,7 +308,10 @@ Imagick::setResourceLimit(Imagick::RESOURCETYPE_MEMORY, 256 * 1024 * 1024);
 `photoUrl($field, 'thumb')` compute the path by string arithmetic from the stored primary —
 that's why v2 needs no migration for conversions — so they return a path whether or not the
 file actually exists there. A conversion failure during `updatePhoto()` does throw (it isn't
-swallowed), so reaching this state requires the caller to have caught and discarded that
+swallowed) — including a disk that silently rejects the write: `Storage::put()` returns
+`false` rather than throwing on Laravel's default filesystem config, so this package checks
+that return value itself and raises `StorageFailedException` rather than letting a missing
+file pass unnoticed. Reaching this state therefore requires the caller to have caught and discarded that
 exception, or a file to have been removed out-of-band afterwards — but if you need certainty,
 check the disk. `regeneratePhotoConversions()` is idempotent, so re-running it is always safe.
 
@@ -330,6 +338,17 @@ as bytes nothing will ever collect, because that directory is no longer anyone's
 the time the job finishes. The same hazard exists in the synchronous path (two simultaneous
 `updatePhoto()` calls on the same row and field), but queueing widens the window from
 milliseconds to however long your queue is backed up.
+
+A related, deliberately-parked case: if a row is soft-deleted before a queued conversion job
+for it runs, the job silently no-ops. `ProcessConversionsJob::handle()` looks the row up with
+a plain `find()`, which — like any query on a `SoftDeletes` model — excludes trashed rows by
+default, so the job treats a soft-deleted row exactly like a genuinely deleted one and returns
+without generating anything. The files aren't touched (soft delete keeps them, as above), but
+the conversion is simply never made, and after a later `restore()`, `photoUrl($field, 'thumb')`
+will keep handing out a URL to a file that was never written. This was left unfixed on purpose
+— using `withTrashed()` in the job would do conversion work for a row that may never come back.
+If you restore a row that had conversions queued while it was trashed, call
+`regeneratePhotoConversions($field)` afterwards to fill them in.
 
 **7. Bulk deletes bypass the cleanup hook entirely.** File cleanup on delete runs off
 Eloquent's `deleted` model event. `Model::where(...)->delete()`, `truncate()`, and

@@ -42,6 +42,27 @@ carry the v1 call site over unchanged.
    `quality: 50` explicitly, either in `config/eloquent_photo.php` or per-field on
    `PhotoDefinition`. Existing files are untouched either way — this only affects new writes.
 
+## Two more things to know before you upgrade
+
+**Pre-v2 rows can now throw where they used to silently return a wrong value.** v1's defect #3
+let an unsanitized name attribute reach the storage path, so a v1-era row can legitimately have
+a `..` segment (or, separately, a null byte) sitting in its stored photo column. v2's
+`photoPath()`, `photoUrl()`, `photoFullPath()`, and `$model->photo_url` all now throw
+`InvalidPhotoException` the moment they see that in a stored value, rather than handing back a
+path that could escape the disk root. That's the better failure — and it's recoverable, since
+calling `updatePhoto()` overwrites the column with a freshly generated, safe path regardless of
+what was there before — but it means a v1-era row carrying a tampered value that used to read
+back a (wrong) value will now throw on read instead, until it's re-uploaded.
+
+**`deletePhotoFiles()` deletes immediately — it does not wait for a transaction to commit.**
+`deletePhoto()` and the model-delete cleanup hook both defer their file deletion until the
+enclosing transaction commits, so a rollback can't leave a restored row pointing at a file
+that's already gone. `deletePhotoFiles()` is different by design: its whole purpose is to
+remove files while leaving the column untouched, so there's no column change for a rollback to
+undo, and deferring the delete would only leave files sitting around for no benefit. Calling
+`deletePhotoFiles()` inside a transaction you might roll back does not protect the files —
+they're gone immediately, even if the transaction later aborts.
+
 ## Before / after
 
 **v1:**

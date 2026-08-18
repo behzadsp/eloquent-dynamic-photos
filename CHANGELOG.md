@@ -29,6 +29,9 @@ All notable changes to `eloquent-dynamic-photos` will be documented in this file
   `ext-exif`; a no-op without it).
 - `deletePhoto($field)`, new in v2: deletes the file(s) **and** clears and saves the column.
   (`deletePhotoFiles($field)` — the renamed v1 `deletePhotoFile()` — deletes files only.)
+- `StorageFailedException`, raised when the configured disk rejects a write (`Storage::put()`
+  returning `false`, which Laravel's default filesystem config does on failure instead of
+  throwing) — for both the primary and every conversion.
 - A real test suite: pest + orchestra/testbench, real encoded image fixtures, `Storage::fake()`
   for filesystem assertions. `composer test`, `composer test:coverage`, `composer lint`, and
   `composer analyse` scripts. A GitHub Actions CI matrix (PHP 8.3–8.5 × Laravel 11–13).
@@ -73,8 +76,9 @@ Each of the following was a defect in v1, each now has a named regression test:
 - The freshly encoded image was discarded and encoded a second time, doubling CPU and peak
   memory on every upload. v2 encodes once.
 - The `_url` accessor used `str_replace('_url', '', $key)`, which strips every occurrence of
-  the substring, not just the suffix — `url_photo_url` resolved to field `_photo`. v2 uses
-  `substr($key, 0, -4)`.
+  the substring, not just the suffix — a field named `image_url`, accessed as `image_url_url`,
+  resolved to field `image` (both `_url` occurrences removed) instead of `image_url`. v2 uses
+  `substr($key, 0, -4)`, which strips only the trailing occurrence.
 - The `_url` accessor fired for any attribute pair ending in `_url`, so a model with a real
   `website` and `website_url` column silently returned `Storage::url($website)` for
   `website_url`. It's now gated on fields declared in `photoDefinitions()`; everything else
