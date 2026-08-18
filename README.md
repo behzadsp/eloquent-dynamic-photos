@@ -47,24 +47,43 @@ hundreds of MB to decode.
 
 Frame count is read from the file's bytes, not by decoding it, and only two containers are
 understood: GIF (via its Graphic Control Extension markers) and WebP (via its `ANMF` chunks).
-Any other format — including a static image in any format, or an animated format not listed
-here — counts as one frame and relies on `max_file_size` and PHP's `memory_limit` as backstops.
+Every other container — including a static image in any format, or an animated format not
+listed here (a multi-page TIFF, for example) — counts as one frame.
 
-Whether an animated source is *stored* as an animation also depends on your configured
-`driver`:
+`max_file_size` still applies to every upload, but compressed bytes are not a proxy for decode
+cost, so it does not close this gap on its own. Nor does PHP's `memory_limit`: it bounds the
+`gd` driver, but it does **not** bound `imagick` — ImageMagick allocates memory natively,
+outside PHP's memory manager, so a decode that exceeds available memory under `imagick` will
+not be stopped by `memory_limit`. This is measured, not theoretical: a 544 KB, 100-page LZW
+TIFF costs roughly 986 MB to decode under `imagick`, entirely outside what this guard budgets.
 
-- `gd` (the default) always flattens animation to a single frame on encode — GD's WebP and most
-  other encoders cannot write more than one frame regardless of the source.
-- `imagick` preserves animation on encode where the target format supports it (WebP, GIF).
-
-If you run the `imagick` driver, consider also bounding the decoder itself in your application's
-bootstrap, as the only structurally complete defence against a decode-memory spike — this guard
-predicts cost from bytes, which can never be exhaustive, while a resource limit caps the decoder
-directly:
+If you run the `imagick` driver — especially with `allowed_mime_types` extended beyond this
+package's default, which excludes TIFF and every other multi-page or multi-frame format besides
+GIF and WebP — set a hard ceiling on the decoder itself. It is the only structurally complete
+defence available, because it caps the decoder directly instead of predicting its cost from
+bytes:
 
 ```php
 Imagick::setResourceLimit(Imagick::RESOURCETYPE_MEMORY, 256 * 1024 * 1024);
 ```
+
+Whether an animated source is *stored* as an animation depends on both the driver and the
+target `format`, verified against the installed `intervention/image` 4.2.1 source and by
+encoding real animated GIF/WebP fixtures through each combination:
+
+- `gd` + `gif`: **preserved**. `Gd\Encoders\GifEncoder::encode()` calls `encodeAnimated()`
+  whenever `$image->isAnimated()`.
+- `gd` + `webp` (and every other `gd` target format): **flattened to one frame**. Only
+  `GifEncoder` checks `isAnimated()`; every other `gd` encoder reads
+  `$image->core()->native()`, which `gd`'s `Core` always resolves to the first frame.
+- `imagick` + `gif`: **preserved**. `Imagick\Core::native()` returns the underlying `Imagick`
+  object holding every frame, and `GifEncoder` writes it with `getImagesBlob()` unconditionally.
+- `imagick` + `webp`: **preserved** when the source `isAnimated()` — `WebpEncoder` explicitly
+  skips its single-layer merge step in that case.
+
+Not tested: other `imagick` target formats (PNG, JPEG, etc.) also read the full multi-frame
+object and call `getImagesBlob()`, so they may write more than one image into the output file —
+but whether that produces a viewable animation depends on the format, and was not verified.
 
 ## Usage
 
