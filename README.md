@@ -2,74 +2,253 @@
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/behzadsp/eloquent-dynamic-photos.svg?style=flat-square)](https://packagist.org/packages/behzadsp/eloquent-dynamic-photos)
 [![Total Downloads](https://img.shields.io/packagist/dt/behzadsp/eloquent-dynamic-photos.svg?style=flat-square)](https://packagist.org/packages/behzadsp/eloquent-dynamic-photos)
+[![Tests](https://github.com/behzadsp/eloquent-dynamic-photos/actions/workflows/tests.yml/badge.svg)](https://github.com/behzadsp/eloquent-dynamic-photos/actions/workflows/tests.yml)
 
-This is a Laravel Eloquent trait that provides an easy and dynamic way to manage photos in your Eloquent models.
+A Laravel Eloquent trait for storing a photo per model column: validation, format conversion,
+named size conversions (thumbnails, etc.), and automatic cleanup — without a media-library
+data model. One file per declared field; no extra database tables.
+
+Upgrading from v1? See [UPGRADE.md](UPGRADE.md) — the model-facing API changed completely.
+
+## Requirements
+
+| | |
+|---|---|
+| PHP | `^8.3` |
+| Laravel | `^11.0 \|\| ^12.0 \|\| ^13.0` |
+| intervention/image | `^4.2` |
+
+No image extension is a hard requirement — the driver (`gd` or `imagick`) is chosen at
+runtime via config. `composer.json` suggests:
+
+- **`ext-gd`** — required if you use the default `gd` driver.
+- **`ext-imagick`** — required if you set `driver` to `imagick`.
+- **`ext-exif`** — required for `auto_orient` to actually do anything. Without it, EXIF
+  orientation cannot be read, `orient()` silently becomes a no-op, and photos uploaded
+  sideways from a phone are stored sideways.
 
 ## Installation
 
-You can install the package via composer:
-
 ```bash
-  composer require behzadsp/eloquent-dynamic-photos
+composer require behzadsp/eloquent-dynamic-photos
 ```
 
-You can publish the config file with:
+Publish the config file:
 
 ```bash
-php artisan vendor:publish --provider="Behzadsp\EloquentDynamicPhotos\Providers\EloquentDynamicPhotosServiceProvider"
+php artisan vendor:publish --tag="eloquent-photo-config"
 ```
 
-This is the contents of the global configurations for uploading images.
+This publishes `config/eloquent_photo.php`, shown in full below.
+
+## Quick start
+
+Add the `HasPhotos` trait to a model and declare which columns hold photos by overriding
+`photoDefinitions()`. Keys are column names; values are per-field configuration. Anything you
+don't pass falls back to the config file.
+
+```php
+use Behzadsp\EloquentDynamicPhotos\Conversion;
+use Behzadsp\EloquentDynamicPhotos\Fit;
+use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
+use Behzadsp\EloquentDynamicPhotos\Traits\HasPhotos;
+
+class User extends Model
+{
+    use HasPhotos;
+
+    protected function photoDefinitions(): array
+    {
+        return [
+            'avatar' => new PhotoDefinition(
+                disk: 's3',
+                nameAttribute: 'username',
+                conversions: [
+                    'thumb' => new Conversion(width: 96, height: 96, fit: Fit::Cover),
+                ],
+            ),
+            'cover' => new PhotoDefinition(), // every setting comes from config
+        ];
+    }
+}
+```
+
+```php
+$user = User::find(1);
+
+$user->updatePhoto($request->file('avatar'), 'avatar');   // validates, stores, saves, converts
+$user->photoUrl('avatar');                                 // public URL of the primary
+$user->photoUrl('avatar', 'thumb');                        // public URL of the "thumb" conversion
+$user->avatar_url;                                          // same as photoUrl('avatar')
+
+$user->deletePhoto('avatar');       // deletes files, sets the column to null, saves
+$user->deletePhotoFiles('avatar');  // deletes files, leaves the column as-is
+```
+
+`updatePhoto()` accepts an `UploadedFile`, an `SplFileInfo`, an absolute path string, a
+binary image string, or a stream resource. It does **not** accept a remote URL — this
+package will not fetch a user-supplied URL server-side.
+
+## Configuration
+
+Every top-level key here is the default a `PhotoDefinition` argument falls back to when you
+don't pass that argument explicitly.
 
 ```php
 <?php
 
 return [
-    'disk' => 'public', // Disk to use for storing photos
-    'root_directory' => 'images', // Root directory for photos
-    'name_attribute' => 'slug', // Model attribute used for file name
-    'quality' => 50, // Quality for encoding the photos
-    'format' => 'webp', // Format of the stored photos
-    'slug_limit' => 240, // Name limit to save in database
-    'timestamp_format' => 'U', // U represents Unix timestamp
+    'disk' => 'public',
+    'directory' => 'images',
+    'name_attribute' => 'slug',
+    'name_limit' => 240,
+    'format' => 'webp',
+    'quality' => 75,
+    'timestamp_format' => 'U',
+    'driver' => 'gd',                 // gd | imagick
+    'max_file_size' => 10240,         // KB
+    'max_width' => 2560,
+    'max_height' => 2560,
+    'max_pixels' => 40_000_000,
+    'allowed_mime_types' => [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'image/avif',
+    ],
+    'auto_orient' => true,
+    'delete_files_on_model_delete' => true,
+    'queue_conversions' => false,
+    'queue' => [
+        'connection' => null,
+        'name' => null,
+    ],
 ];
-
 ```
 
-## Animated images and the pixel-budget guard
+| Key | Meaning |
+|---|---|
+| `disk` | Filesystem disk (from `config/filesystems.php`) files are stored on. |
+| `directory` | Root directory. Each model gets its own subdirectory under it — see below. |
+| `name_attribute` | Model attribute the filename is derived from (slugified). |
+| `name_limit` | Maximum length of the slugified name portion of the filename. |
+| `format` | Stored format for the primary file — any format `intervention/image` can encode. |
+| `quality` | Encoding quality, passed straight to the encoder. |
+| `timestamp_format` | `date()`-style format for the timestamp segment of the filename. `U` is a Unix timestamp. |
+| `driver` | `gd` or `imagick`. Resolved once per container lifetime — see the caveat below. |
+| `max_file_size` | Reject uploads whose compressed size (KB) exceeds this. |
+| `max_width` / `max_height` | Bounding box for the stored primary. Larger images are scaled down, never rejected, never upscaled. Set either to `null` to disable that axis. |
+| `max_pixels` | Reject an image whose *decoded* pixel budget (width × height × frame count) exceeds this, checked before decoding. See "The memory guard is incomplete" below. |
+| `allowed_mime_types` | Allowlist checked against the decoded image, not any client-supplied header. SVG is deliberately absent — see below. |
+| `auto_orient` | Bake EXIF rotation into the pixels before encoding. Needs `ext-exif`; a no-op without it. |
+| `delete_files_on_model_delete` | Whether the delete hook (below) runs at all. |
+| `queue_conversions` | Generate named conversions on a queue instead of inline during `updatePhoto()`. |
+| `queue.connection` / `queue.name` | Queue connection/name for conversion jobs. `null` uses the app's defaults. |
 
-Uploads are checked against `max_pixels` (default 40,000,000) before they are decoded, because
-compressed byte size does not bound decode memory: a small, highly-compressible image can still
-be an enormous bitmap once decoded. For an animated source, the budget is `width * height *
-frame count`, not just `width * height` — `getimagesize()` only ever reports the first frame, so
-a low-resolution animation with many frames can otherwise slip through while still costing
-hundreds of MB to decode.
+**The `driver` and `directory` config values are read once and cached for the life of the
+container** (they back a `singleton()` binding). A long-running worker (Octane, a queue
+worker) that changes either per-request or per-tenant must call
+`app()->forgetInstance(\Intervention\Image\ImageManager::class)` (or `PathGenerator::class`)
+itself to pick up the change.
 
-Frame count is read from the file's bytes, not by decoding it, and only two containers are
-understood: GIF (via its Graphic Control Extension markers) and WebP (via its `ANMF` chunks).
-Every other container — including a static image in any format, or an animated format not
-listed here (a multi-page TIFF, for example) — counts as one frame.
+**SVG is excluded from the default allowlist on purpose.** It is not a raster format the
+encoder can normalise, and an SVG served back from a public disk is a stored XSS vector.
+Do not add it unless you understand and accept that risk.
 
-`max_file_size` still applies to every upload, but compressed bytes are not a proxy for decode
-cost, so it does not close this gap on its own. Nor does PHP's `memory_limit`: it bounds the
-`gd` driver, but it does **not** bound `imagick` — ImageMagick allocates memory natively,
-outside PHP's memory manager, so a decode that exceeds available memory under `imagick` will
-not be stopped by `memory_limit`. This is measured, not theoretical: a 544 KB, 100-page LZW
-TIFF costs roughly 986 MB to decode under `imagick`, entirely outside what this guard budgets.
+### Storage layout
 
-If you run the `imagick` driver — especially with `allowed_mime_types` extended beyond this
-package's default, which excludes TIFF and every other multi-page or multi-frame format besides
-GIF and WebP — set a hard ceiling on the decoder itself. It is the only structurally complete
-defence available, because it caps the decoder directly instead of predicting its cost from
-bytes:
+```
+{directory}/{model-dir}/{name}_{random}_{timestamp}.{format}                        primary
+{directory}/{model-dir}/conversions/{primary-basename}/{conversion}.{format}        conversion
+```
+
+`{model-dir}` is the plural, lowercased class basename (`User` → `users`). A `directory`
+passed to `PhotoDefinition` replaces the **entire** prefix, both segments.
+
+Conversion paths are **derived from the stored primary path** by string arithmetic — v2
+stores no separate conversion columns and needs no migration. This has a consequence; see
+"A conversion path is derived, not verified" below.
+
+## Public API
+
+| Method | Behaviour |
+|---|---|
+| `updatePhoto(mixed $photo, string $field): static` | Validate, encode, store the primary, `save()`, generate/queue conversions, then delete the old file(s). |
+| `deletePhoto(string $field): bool` | Clear the column, `save()`, then delete the file(s). Returns whether the primary file was actually deleted. |
+| `deletePhotoFiles(string $field): bool` | Delete the file(s), leave the column as it is. Returns the filesystem's own boolean for whether the primary was actually deleted — see [CHANGELOG.md](CHANGELOG.md) for why that matters. |
+| `photoUrl(string $field, ?string $conversion = null): ?string` | Public URL, or `null` if the column is empty. |
+| `photoPath(string $field, ?string $conversion = null): ?string` | Disk-relative path, or `null` if the column is empty. |
+| `photoFullPath(string $field, ?string $conversion = null): ?string` | Absolute local filesystem path. Throws `UnsupportedDiskOperation` if the field's disk isn't a local filesystem (S3, etc. — there is no local path to give you). |
+| `regeneratePhotoConversions(string $field): void` | Re-derive every declared conversion from the currently stored primary. Idempotent. |
+| `{field}_url` | Sugar for `photoUrl($field)`, for every field declared in `photoDefinitions()`. |
+
+Passing a conversion name that isn't declared on that field to `photoUrl()`, `photoPath()`,
+or `photoFullPath()` throws `PhotoDefinitionException` rather than silently returning a URL
+to a file that was never generated. Calling any of these methods (or `updatePhoto()`) with a
+field that isn't a key in `photoDefinitions()` throws the same exception.
+
+All exceptions this package throws extend `Behzadsp\EloquentDynamicPhotos\Exceptions\EloquentPhotoException`
+(itself a `RuntimeException`), so you can catch one type if you want. The others are
+`InvalidPhotoException` (bad/oversized/disallowed source) and `UnsupportedDiskOperation`
+(`photoFullPath()` on a non-local disk).
+
+### The `{field}_url` accessor is not `$appends`-compatible
+
+`$model->avatar_url` works out of the box for any field declared in `photoDefinitions()`.
+But **do not add it to `$appends`**:
 
 ```php
-Imagick::setResourceLimit(Imagick::RESOURCETYPE_MEMORY, 256 * 1024 * 1024);
+protected $appends = ['avatar_url']; // throws BadMethodCallException
 ```
 
-Whether an animated source is *stored* as an animation depends on both the driver and the
-target `format`, verified against the installed `intervention/image` 4.2.1 source and by
-encoding real animated GIF/WebP fixtures through each combination:
+This throws because of how Laravel resolves appended attributes. `toArray()`/`toJson()`
+read appended keys through `get{Studly}Attribute()` — for `avatar_url` that's
+`getAvatarUrlAttribute()` — and never go through this trait's `getAttribute()` override,
+which is the only place the `_url` suffix is understood. Since no such method exists, Laravel's
+`Model::__call()` forwards the call to the query builder, which doesn't have it either, and
+you get a `BadMethodCallException`.
+
+Direct property access (`$model->avatar_url`) works fine because that goes through
+`getAttribute()`. Only the `$appends`/serialization path is broken.
+
+If you need the URL in `toArray()`/JSON, define your own attribute accessor and append
+*that* instead:
+
+```php
+use Illuminate\Database\Eloquent\Casts\Attribute;
+
+class User extends Model
+{
+    use HasPhotos;
+
+    protected $appends = ['avatar_thumb_url'];
+
+    protected function avatarThumbUrl(): Attribute
+    {
+        return Attribute::get(fn () => $this->photoUrl('avatar', 'thumb'));
+    }
+
+    protected function photoDefinitions(): array
+    {
+        // ...
+    }
+}
+```
+
+This works because Laravel resolves `Attribute`-typed accessor methods (`avatarThumbUrl()`
+for the `avatar_thumb_url` key) directly, independent of `getAttribute()`. Name your
+accessor something other than the bare field name (`avatarUrl`, `photoUrl`, etc.) — those
+collide with this trait's own `photoUrl($field, $conversion)` method.
+
+## Behaviours you should know about
+
+These are not bugs — they're consequences of how this package works that aren't obvious
+from the method signatures above. Each was found and verified while building v2.
+
+**1. Whether an animated upload stays animated depends on both the driver and the target
+format.** Verified against the installed `intervention/image` 4.2.1 source and by encoding
+real animated GIF/WebP fixtures through each combination:
 
 - `gd` + `gif`: **preserved**. `Gd\Encoders\GifEncoder::encode()` calls `encodeAnimated()`
   whenever `$image->isAnimated()`.
@@ -85,92 +264,90 @@ Not tested: other `imagick` target formats (PNG, JPEG, etc.) also read the full 
 object and call `getImagesBlob()`, so they may write more than one image into the output file —
 but whether that produces a viewable animation depends on the format, and was not verified.
 
-## Usage
+**2. `max_width`, `max_height` and `max_pixels` can only be disabled globally**, by setting the
+config key to `null`. Passing `null` for one of these to `PhotoDefinition` means "use the
+configured value" — there is no way to disable a bound for one field while keeping it for
+others. If you need that, give the field its own disk/directory and set the bound globally to
+`null` for that separate configuration, or fork the config per environment.
 
-After installing the package, simply use the `HasPhotos` trait in your Eloquent models:
+**3. The memory guard is deliberately incomplete.** `max_pixels` budgets total decoded pixels
+(`width × height × frame count`) before decoding, because compressed byte size does not bound
+decode memory — a small, highly-compressible image can still be an enormous bitmap once
+decoded. Frame count is read from the raw bytes, and only two containers are understood: GIF
+(via Graphic Control Extension markers) and WebP (via `ANMF` chunks). Every other container —
+including a static image in any format, or an animated format not listed here (a multi-page
+TIFF, for example) — counts as one frame and relies on `max_file_size` and PHP's `memory_limit`
+as backstops.
 
-```php
-use Behzadsp\EloquentDynamicPhotos\Traits\HasPhotos;
+`max_file_size` does not close this gap on its own — it bounds compressed bytes, not decode
+cost. Nor does PHP's `memory_limit` reliably: it provides some backstop for the `gd` driver
+(an allocation large enough to exceed a finite `memory_limit` fails the request), but it does
+**not** bound `imagick` at all — ImageMagick allocates its pixel buffers natively, outside
+PHP's memory manager, so a decode that exceeds available memory under `imagick` is not stopped
+by `memory_limit`. This was measured directly: in this package's own test environment (with
+`memory_limit` effectively unlimited), a 544 KB, 100-page LZW TIFF fed through the `imagick`
+driver allocated roughly 986 MB and stored successfully with no error of any kind — a
+container this guard's two-format frame counter does not recognize.
 
-class YourModel extends Model
-{
-    use HasPhotos;
-
-    // ...
-}
-```
-
-Of course, you can override certain config in individual model by declaring the corresponding method. Like below:
-
-```php
-class User extends Model
-{
-    use HasPhotos;
-
-    protected function eloquentPhotoDisk()
-    {
-        return 'user-avatar';
-    }
-
-    protected function eloquentPhotoFormat()
-    {
-        return 'png';
-    }
-    
-    protected function eloquentPhotoRootDirectory()
-    {
-        return 'images';
-    }
-    
-    protected function eloquentPhotoQuality()
-    {
-        return '50';
-    }
-    
-    protected function eloquentPhotoNameAttribute()
-    {
-        return 'slug';
-    }
-    
-    protected function eloquentPhotoSlugLimit()
-    {
-        return '240';
-    }
-    
-    protected function eloquentPhotoTimestampFormat()
-    {
-        return 'U';
-    }
-}
-```
-
-You can now use the methods provided by the trait in your models:
+If you run the `imagick` driver — especially if you extend `allowed_mime_types` beyond this
+package's default, which excludes TIFF and every other multi-page/multi-frame format besides
+GIF and WebP — set a hard ceiling on the decoder itself. It is the only structurally complete
+defence available, because it caps the decoder directly instead of predicting its cost from
+bytes:
 
 ```php
-$model = YourModel::first();
-
-// delete photo file only and not database column.
-$model->deletePhotoFile('photo_field');
-
-// update photo file and save it to database column.
-$model->updatePhoto($photo, 'photo_field');
-
-// get full photo path
-$model->getPhotoFullPath('photo_path');
-
-// get photo directory path
-$model->getPhotoDirectoryPath();
-
-// get photo URL
-$model->photo_field_url;
+Imagick::setResourceLimit(Imagick::RESOURCETYPE_MEMORY, 256 * 1024 * 1024);
 ```
+
+**4. A conversion path is derived, not verified.** `photoPath($field, 'thumb')` and
+`photoUrl($field, 'thumb')` compute the path by string arithmetic from the stored primary —
+that's why v2 needs no migration for conversions — so they return a path whether or not the
+file actually exists there. A conversion failure during `updatePhoto()` does throw (it isn't
+swallowed), so reaching this state requires the caller to have caught and discarded that
+exception, or a file to have been removed out-of-band afterwards — but if you need certainty,
+check the disk. `regeneratePhotoConversions()` is idempotent, so re-running it is always safe.
+
+**5. `updatePhoto()` and `deletePhoto()` call `save()`.** Any other unsaved changes on the
+model are persisted along with the photo change.
+
+**6. `queue_conversions` needs a working queue-failure pipeline, and it widens an existing
+race.** Conversion failures deliberately propagate rather than being swallowed — a conversion
+path is derived (point 4 above), so silently swallowing a failure would leave `photoUrl()`
+pointing at a file that was never written. With `queue_conversions` off, that exception
+reaches the code that called `updatePhoto()`. With it **on**, the exception surfaces inside a
+queue **worker**, not the uploader — so enabling `queue_conversions` without a working
+`failed_jobs` table (or Horizon, or a `queue.failed` listener) means a permanently failed
+conversion produces no signal anywhere, and `photoUrl($field, 'thumb')` will keep handing out
+URLs to a file that doesn't exist. Treat a failure pipeline as a prerequisite for
+`queue_conversions`, not an optional nicety.
+
+Re-uploading a field while its previous conversion job is still queued is handled: the job
+compares the row's current raw column value against the path it was dispatched for, and
+no-ops quietly if a newer upload has already replaced it. But a residual hazard remains under
+true concurrency — if a queued job is mid-write when a second upload's cleanup deletes that
+primary's whole conversion directory, partially-written files can be dropped, or left behind
+as bytes nothing will ever collect, because that directory is no longer anyone's "old path" by
+the time the job finishes. The same hazard exists in the synchronous path (two simultaneous
+`updatePhoto()` calls on the same row and field), but queueing widens the window from
+milliseconds to however long your queue is backed up.
+
+**7. Bulk deletes bypass the cleanup hook entirely.** File cleanup on delete runs off
+Eloquent's `deleted` model event. `Model::where(...)->delete()`, `truncate()`, and
+`deleteQuietly()` all skip Eloquent model events by design, so the `deleted` listener never
+fires and their files are silently orphaned. This is inherent to any event-based hook, not a
+defect in this package — but it's a foreseeable source of orphaned files for an app doing
+bulk cleanup. If the files matter, iterate the models and call `delete()` (or `forceDelete()`)
+on each row instead of a bulk query.
 
 ## Testing
 
 ```bash
-  composer test
+composer test            # pest
+composer test:coverage   # pest --coverage
+composer lint             # pint
+composer analyse          # phpstan (larastan), level max
 ```
 
 ## License
 
-The MIT License (MIT). Please see [License File](https://github.com/behzadsp/eloquent-dynamic-photos/blob/main/LICENSE) for more information.
+The MIT License (MIT). Please see the [License File](LICENSE) for more information.
