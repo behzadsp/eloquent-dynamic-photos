@@ -1,5 +1,6 @@
 <?php
 
 declare(strict_types=1);
+use Behzadsp\EloquentDynamicPhotos\Tests\TestCase;
 
-uses(Behzadsp\EloquentDynamicPhotos\Tests\TestCase::class)->in(__DIR__);
+uses(TestCase::class)->in(__DIR__);
