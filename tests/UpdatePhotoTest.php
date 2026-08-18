@@ -99,3 +99,49 @@ it('cleans up the written file when the save fails', function (): void {
 it('refuses an undeclared field', function (): void {
     Post::create(['slug' => 'a'])->updatePhoto(Fixtures::png(), 'title');
 })->throws(PhotoDefinitionException::class, 'not declared');
+
+it('surfaces the original save failure even when the compensating delete also fails', function (): void {
+    $post = Post::create(['slug' => 'my-post']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+    $original = storedPath($post);
+
+    // A double over the real fake disk: unstubbed calls (the write below)
+    // still hit the real disk, but delete() always fails, simulating the
+    // disk itself being unavailable during cleanup.
+    $flakyDisk = Mockery::mock(Storage::disk('photos'));
+    $flakyDisk->shouldReceive('delete')->andThrow(new RuntimeException('disk unavailable during cleanup'));
+    Storage::set('photos', $flakyDisk);
+
+    Post::saving(function (): void {
+        throw new RuntimeException('save blew up');
+    });
+
+    try {
+        // The caller needs to know the save failed, not that cleanup also
+        // failed afterwards.
+        expect(fn () => $post->updatePhoto(Fixtures::png(), 'photo'))
+            ->toThrow(RuntimeException::class, 'save blew up');
+
+        // Still restored, even though the compensating delete above threw.
+        expect($post->photo)->toBe($original);
+    } finally {
+        Post::flushEventListeners();
+    }
+});
+
+it('does not fail the update when cleaning up the old file fails after a successful save', function (): void {
+    $post = Post::create(['slug' => 'my-post']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+    $original = storedPath($post);
+
+    $flakyDisk = Mockery::mock(Storage::disk('photos'));
+    $flakyDisk->shouldReceive('delete')->andThrow(new RuntimeException('disk unavailable during cleanup'));
+    Storage::set('photos', $flakyDisk);
+
+    // The save already succeeded by the time the old file is cleaned up, so a
+    // failure here must not turn a successful update into an error.
+    $post->updatePhoto(Fixtures::png(), 'photo');
+
+    expect($post->photo)->not->toBe($original);
+    Storage::disk('photos')->assertExists(storedPath($post));
+});

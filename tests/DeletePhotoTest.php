@@ -68,3 +68,25 @@ it('reports false when there is nothing to delete', function (): void {
     expect($post->deletePhoto('photo'))->toBeFalse();
     expect($post->deletePhotoFiles('banner'))->toBeFalse();
 });
+
+it('leaves the file and column alone when the save fails', function (): void {
+    // v1's dead-pointer bug, on the delete path: deleting the file before
+    // saving would leave the column pointing at a file that no longer
+    // existed if the save then failed.
+    $post = postWithPhoto();
+    $path = deletablePath($post);
+
+    Post::saving(function (): void {
+        throw new RuntimeException('save blew up');
+    });
+
+    try {
+        expect(fn () => $post->deletePhoto('photo'))
+            ->toThrow(RuntimeException::class, 'save blew up');
+
+        Storage::disk('photos')->assertExists($path);
+        expect(freshPostOrFail($post)->photo)->toBe($path);
+    } finally {
+        Post::flushEventListeners();
+    }
+});

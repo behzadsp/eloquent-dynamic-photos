@@ -59,15 +59,31 @@ trait HasPhotos
         try {
             $this->save();
         } catch (Throwable $e) {
-            // Nothing durable happened, so leave nothing behind.
-            $this->eloquentPhotoDisk($field)->delete($newPath);
+            // Restore the in-memory column first, so that always happens even
+            // if the compensating delete below also fails.
             $this->setAttribute($field, $oldPath);
+
+            try {
+                // Best-effort: nothing durable happened, so this is tidying up
+                // an orphan, not something the caller needs to hear about. If
+                // it fails too, $e (why the save failed) is what matters.
+                $this->eloquentPhotoDisk($field)->delete($newPath);
+            } catch (Throwable) {
+                // Swallowed — see comment above.
+            }
 
             throw $e;
         }
 
         if ($oldPath !== null && $oldPath !== $newPath) {
-            $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
+            try {
+                // Best-effort: the save already succeeded, so a failure here
+                // must not turn a successful update into an error. It only
+                // leaves an orphaned file behind.
+                $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
+            } catch (Throwable) {
+                // Swallowed — see comment above.
+            }
         }
 
         return $this;
@@ -81,6 +97,11 @@ trait HasPhotos
      * refusing to let anyone clean up leaves the row bricked, recoverable
      * only via raw SQL. Nothing is deleted from disk in that case, hence
      * false, but the column is fixed.
+     *
+     * Ordering mirrors updatePhoto(): the column is cleared and saved first,
+     * and only then are the files removed. Deleting first would leave the
+     * column pointing at a file that no longer existed if the save then
+     * failed — the same dead-pointer bug updatePhoto() exists to avoid.
      */
     public function deletePhoto(string $field): bool
     {
@@ -90,12 +111,19 @@ trait HasPhotos
             return false;
         }
 
-        $deleted = $this->eloquentPhotoDeleteFilesAt($field, $this->eloquentPhotoUsableRawPath($field));
+        $oldPath = $this->eloquentPhotoUsableRawPath($field);
 
         $this->setAttribute($field, null);
         $this->save();
 
-        return $deleted;
+        try {
+            // Best-effort: the column is already cleared and saved, so a
+            // failure here must not turn a successful delete into an error.
+            // It only leaves an orphaned file behind.
+            return $this->eloquentPhotoDeleteFilesAt($field, $oldPath);
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**
