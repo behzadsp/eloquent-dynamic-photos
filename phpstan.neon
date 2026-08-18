@@ -18,3 +18,18 @@ parameters:
         -
             identifier: trait.unused
             path: src/Traits/HasPhotos.php
+
+        # Pest binds `$this` inside it()/beforeEach() closures to a TestCase
+        # instance at runtime, but phpstan (via larastan, with no pest-stub
+        # package installed) only sees Pest\PendingCalls\TestCall's static type
+        # there, which has no `generator` property. This is a known Pest+PHPStan
+        # gap, not a real bug: PathGeneratorTest's shared fixture (task-4 brief,
+        # verbatim) needs `$this->generator` because a local variable can't cross
+        # from beforeEach() into it(). Scoped to this one file and these two
+        # error kinds so a genuine accessor bug elsewhere still fails the build.
+        -
+            identifier: property.notFound
+            path: tests/PathGeneratorTest.php
+        -
+            identifier: method.nonObject
+            path: tests/PathGeneratorTest.php
