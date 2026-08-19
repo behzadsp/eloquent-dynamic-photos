@@ -200,7 +200,14 @@ final readonly class PhotoDefinition
     // yields "80", not 80. That is a standard pattern, not a misconfiguration,
     // so unambiguous string forms are coerced; anything else still throws.
 
-    private static function configString(string $key): string
+    /**
+     * Public: also used by the service provider to read the root directory into
+     * PathGenerator. That key has no per-field equivalent (a field's own
+     * directory replaces the root outright rather than falling back to it), so
+     * it never reaches the constructor above — but an unreadable value must
+     * still be a loud misconfiguration, not a silent "" meaning the disk root.
+     */
+    public static function configString(string $key): string
     {
         $value = self::config($key);
 

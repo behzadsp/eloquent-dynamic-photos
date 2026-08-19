@@ -60,6 +60,18 @@ it('binds a PathGenerator seeded with the configured root directory', function (
         ->toBe('uploads/posts');
 });
 
+it('rejects a root directory it cannot read as a string', function (): void {
+    // The realistic trigger is env('PHOTO_DIRECTORY') with no default, which
+    // returns null. Silently treating that as "" would write every photo to the
+    // disk root instead of erroring, so it goes through the same narrowing as
+    // every other config key rather than an inline is_string() fallback.
+    config()->set('eloquent_photo.directory', null);
+    app()->forgetInstance(PathGenerator::class);
+
+    expect(fn () => app(PathGenerator::class))
+        ->toThrow(PhotoDefinitionException::class, 'Config key [eloquent_photo.directory] must be a string, null given.');
+});
+
 it('publishes its config under a namespaced tag', function (): void {
     expect(array_keys(ServiceProvider::pathsToPublish(
         EloquentDynamicPhotosServiceProvider::class,

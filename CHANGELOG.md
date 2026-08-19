@@ -46,6 +46,10 @@ All notable changes to `eloquent-dynamic-photos` will be documented in this file
 - Default `quality` raised from `50` to `75` — 50 was visibly lossy as a default. New uploads
   are larger and look better; existing stored files are unaffected.
 - Config key `root_directory` renamed to `directory`; `slug_limit` renamed to `name_limit`.
+- Every config key is now read strictly: a value of the wrong type raises
+  `PhotoDefinitionException` naming the key instead of being cast or silently ignored.
+  `env()`-shaped strings (`"75"`, `"true"`) are still accepted, since Laravel's `env()`
+  leaves numeric and boolean strings as strings.
 - `photoFullPath()`, `photoPath()`, and `photoUrl()` now take a **field name**, not a raw path
   — v1's `getPhotoFullPath()` took the path itself.
 - Conversion files now live at `{directory}/{model-dir}/conversions/{primary-basename}/{conversion}.{format}`

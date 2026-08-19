@@ -6,6 +6,7 @@ namespace Behzadsp\EloquentDynamicPhotos\Providers;
 
 use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\PathGenerator;
+use Behzadsp\EloquentDynamicPhotos\PhotoDefinition;
 use Behzadsp\EloquentDynamicPhotos\PhotoProcessor;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
@@ -44,10 +45,8 @@ class EloquentDynamicPhotosServiceProvider extends ServiceProvider
 
         // Same caching caveat as the ImageManager binding above: the root directory
         // is captured once, at first resolution.
-        $this->app->singleton(PathGenerator::class, static function (Application $app): PathGenerator {
-            $directory = $app->make(ConfigRepository::class)->get('eloquent_photo.directory');
-
-            return new PathGenerator(is_string($directory) ? $directory : '');
+        $this->app->singleton(PathGenerator::class, static function (): PathGenerator {
+            return new PathGenerator(PhotoDefinition::configString('directory'));
         });
 
         $this->app->singleton(PhotoProcessor::class, static function (Application $app): PhotoProcessor {
