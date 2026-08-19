@@ -3,6 +3,20 @@
 All notable changes to `eloquent-dynamic-photos` will be documented in this file, in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## 2.0.1 - 2026-08-19
+
+### Changed
+
+- Nothing in the code differs from 2.0.0's intent — this release exists because Packagist
+  pinned `v2.0.0` to the commit before the Laravel 11 removal and cannot be moved off it. The
+  tag was re-cut on the corrected commit, but Packagist's git mirror keeps the tag object it
+  first saw, so re-running an update re-publishes the same stale reference. A new tag is the
+  only way to ship the corrected metadata.
+- Effective difference from the `v2.0.0` that Packagist serves: Laravel 11 is not supported.
+  `illuminate/*` is `^12.0 || ^13.0` and `orchestra/testbench` is `^10.0 || ^11.0`. See the
+  2.0.0 notes below for why — Laravel 11 has unpatched advisories and Composer 2.10+ refuses
+  to install any 11.x release.
+
 ## 2.0.0 - 2026-08-19
 
 ### Added
