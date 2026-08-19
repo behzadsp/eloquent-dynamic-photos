@@ -397,6 +397,45 @@ it('fails clearly when the conversion source is missing', function (): void {
     );
 })->throws(InvalidPhotoException::class, 'p/gone.webp');
 
+it('rejects a disallowed container before decoding it, not after', function (): void {
+    // The post-decode media-type check cannot be the memory control: under the
+    // imagick driver a 100-page TIFF is fully materialised before anything
+    // looks at its type — measured at roughly 3 GB from 1.4 MB of input, native
+    // allocations that PHP's memory_limit does not bound and that the pixel
+    // budget cannot predict (its frame counter reads GIF and WebP only).
+    //
+    // The assertion pins *which* guard fires. Under the gd driver a TIFF is
+    // undecodable, so if this check ran after decode() the failure would read
+    // "could not be decoded as an image". Getting the allowlist message
+    // instead is only possible from a check that runs first.
+    config()->set('eloquent_photo.driver', 'gd');
+
+    expect(fn () => processor()->storePrimary(
+        multiPageTiff(2, 40, 30), 'photos', 'p/a.webp', new PhotoDefinition,
+    ))->toThrow(InvalidPhotoException::class, 'Images of type [image/tiff] are not allowed.');
+
+    Storage::disk('photos')->assertMissing('p/a.webp');
+})->skip(! extension_loaded('imagick'), 'ext-imagick is not installed (needed to build a TIFF)');
+
+it('still accepts a container the allowlist names once the sniff agrees', function (): void {
+    // The pre-decode check must not reject the formats the default allowlist
+    // does name — getimagesizefromstring() has to agree with the post-decode
+    // media type for every one of them, or the guard is a false-rejection bug.
+    foreach ([Fixtures::png(), Fixtures::jpeg(), Fixtures::gif(), Fixtures::webp()] as $index => $bytes) {
+        processor()->storePrimary($bytes, 'photos', 'p/'.$index.'.webp', new PhotoDefinition);
+        Storage::disk('photos')->assertExists('p/'.$index.'.webp');
+    }
+});
+
+it('lets a container it cannot identify through to the post-decode check', function (): void {
+    // getimagesizefromstring() returns false for anything it cannot place, and
+    // the pre-decode guard deliberately does not fail closed on that: the
+    // source still has to survive decode() and the media-type check there.
+    expect(fn () => processor()->storePrimary(
+        'this is not an image at all', 'photos', 'p/a.webp', new PhotoDefinition,
+    ))->toThrow(InvalidPhotoException::class, 'could not be decoded as an image');
+});
+
 it('throws a storage failure when the disk rejects the primary write', function (): void {
     // put() returns false rather than throwing unless the disk opts into
     // exceptions, which the default Laravel filesystems config does not.
@@ -422,3 +461,26 @@ it('throws a storage failure when the disk rejects a conversion write', function
         $definition, new Conversion(width: 20, height: 20),
     );
 })->throws(StorageFailedException::class, 'p/conversions/a-thumb.webp');
+
+/**
+ * An N-page LZW TIFF, every page identical. Built with imagick directly: no GD
+ * build can write TIFF at all, and the point of the fixture is a container the
+ * pixel-budget guard's frame counter does not understand — it reads GIF and
+ * WebP markers only, so a 100-page TIFF measures as one frame.
+ */
+function multiPageTiff(int $pages, int $width, int $height): string
+{
+    $document = new Imagick;
+
+    for ($page = 0; $page < $pages; $page++) {
+        $image = new Imagick;
+        $image->newImage($width, $height, 'red');
+        $image->setImageFormat('tiff');
+        $image->setImageCompression(Imagick::COMPRESSION_LZW);
+        $document->addImage($image);
+    }
+
+    $document->setImageFormat('tiff');
+
+    return $document->getImagesBlob();
+}

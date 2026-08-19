@@ -21,10 +21,14 @@ All notable changes to `eloquent-dynamic-photos` will be documented in this file
 - Optional queued conversion generation (`queue_conversions`, `queue.connection`, `queue.name`)
   via a new `ProcessConversionsJob`. The primary is always written synchronously; only
   conversions can be deferred.
-- Upload validation in `PhotoProcessor`: a MIME allowlist checked against the decoded image
-  (not a client-supplied header), `max_file_size`, `max_width`/`max_height` (downscale, never
+- Upload validation in `PhotoProcessor`: a MIME allowlist checked twice — against the container
+  sniffed from the raw header before the decoder runs, and again against the decoded image (not
+  a client-supplied header) — plus `max_file_size`, `max_width`/`max_height` (downscale, never
   reject, never upscale), and a `max_pixels` pre-decode pixel-budget guard that accounts for
-  frame count in GIF and WebP sources.
+  frame count in GIF and WebP sources. The pre-decode half is a memory control: a disallowed
+  container never reaches the decoder, so it cannot allocate first and be rejected afterwards.
+  Measured on a 1.4 MB 100-page LZW TIFF under `imagick`, whose frames the pixel budget cannot
+  count: ~3 GB allocated before, 0 MB after.
 - `auto_orient` config option: bakes EXIF rotation into the pixels before encoding (needs
   `ext-exif`; a no-op without it).
 - `deletePhoto($field)`, new in v2: deletes the file(s) **and** clears and saves the column.

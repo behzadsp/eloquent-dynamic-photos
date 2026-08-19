@@ -83,7 +83,7 @@ final class PhotoProcessor
     {
         $this->assertValidSourceType($source);
         $this->assertWithinSizeLimit($source, $definition);
-        $this->assertWithinPixelLimit($source, $definition);
+        $this->assertProbedSourceIsAcceptable($source, $definition);
 
         try {
             // decode() dispatches on the source type for everything except a
@@ -179,24 +179,50 @@ final class PhotoProcessor
      * everything from the raw bytes, before decode() would otherwise build
      * those bitmaps.
      */
-    private function assertWithinPixelLimit(mixed $source, PhotoDefinition $definition): void
+    /**
+     * The two pre-decode guards — container allowlist and pixel budget — share
+     * one cheap header probe rather than reading the source twice.
+     */
+    private function assertProbedSourceIsAcceptable(mixed $source, PhotoDefinition $definition): void
     {
-        if ($definition->maxPixels === null) {
-            return;
-        }
-
         $bytes = $this->probeBytes($source);
 
         if ($bytes === null) {
             // Could not read the bytes cheaply (e.g. a non-seekable stream).
             // Do not fail closed: fall through to decode(), where the
-            // byte-size guard above and PHP's memory_limit still apply.
+            // byte-size guard above, the post-decode media-type check and
+            // PHP's memory_limit still apply.
             return;
         }
 
         $info = getimagesizefromstring($bytes);
 
         if (! is_array($info)) {
+            return;
+        }
+
+        // Rejecting a disallowed container *before* decoding is a memory
+        // control, not a duplicate of the media-type check in decode(): that
+        // one only runs once the decoder has already allocated the full
+        // bitmap, and under imagick that allocation is native, so it is bound
+        // by neither memory_limit nor this package's pixel budget (which
+        // understands frame counts for GIF and WebP only). Measured: a 1.4 MB
+        // 100-page LZW TIFF cost ~3 GB before the post-decode check got to
+        // reject it for exactly the same reason.
+        //
+        // Only a recognised-and-disallowed container rejects here. A container
+        // getimagesizefromstring() cannot identify at all returns false and
+        // already fell through above, so no legitimate source is refused on a
+        // weak signal — the post-decode check remains the backstop for those.
+        if (! in_array($info['mime'], $definition->allowedMimeTypes, true)) {
+            throw new InvalidPhotoException(sprintf(
+                'Images of type [%s] are not allowed. Allowed: %s.',
+                $info['mime'],
+                implode(', ', $definition->allowedMimeTypes)
+            ));
+        }
+
+        if ($definition->maxPixels === null) {
             return;
         }
 

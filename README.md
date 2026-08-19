@@ -295,30 +295,37 @@ configured value" — there is no way to disable a bound for one field while kee
 others. If you need that, give the field its own disk/directory and set the bound globally to
 `null` for that separate configuration, or fork the config per environment.
 
-**3. The memory guard is deliberately incomplete.** `max_pixels` budgets total decoded pixels
-(`width × height × frame count`) before decoding, because compressed byte size does not bound
-decode memory — a small, highly-compressible image can still be an enormous bitmap once
-decoded. Frame count is read from the raw bytes, and only two containers are understood: GIF
-(via Graphic Control Extension markers) and WebP (via `ANMF` chunks). Every other container —
-including a static image in any format, or an animated format not listed here (a multi-page
-TIFF, for example) — counts as one frame and relies on `max_file_size` and PHP's `memory_limit`
-as backstops.
+**3. The pixel budget only understands two multi-frame containers.** `max_pixels` budgets
+total decoded pixels (`width × height × frame count`) before decoding, because compressed byte
+size does not bound decode memory — a small, highly-compressible image can still be an enormous
+bitmap once decoded. Frame count is read from the raw bytes, and only two containers are
+understood: GIF (via Graphic Control Extension markers) and WebP (via `ANMF` chunks). Any other
+multi-frame container measures as a single frame, so its budget is understated by however many
+frames it actually holds.
 
-`max_file_size` does not close this gap on its own — it bounds compressed bytes, not decode
-cost. Nor does PHP's `memory_limit` reliably: it provides some backstop for the `gd` driver
-(an allocation large enough to exceed a finite `memory_limit` fails the request), but it does
-**not** bound `imagick` at all — ImageMagick allocates its pixel buffers natively, outside
-PHP's memory manager, so a decode that exceeds available memory under `imagick` is not stopped
-by `memory_limit`. This was measured directly: in this package's own test environment (with
-`memory_limit` effectively unlimited), a 544 KB, 100-page LZW TIFF fed through the `imagick`
-driver allocated roughly 986 MB and stored successfully with no error of any kind — a
-container this guard's two-format frame counter does not recognize.
+Two things keep that from being exploitable with the shipped config. `allowed_mime_types` is
+checked **twice**: once against the container sniffed from the raw header before the decoder is
+ever called, and again against the decoded image's own media type. The pre-decode check is the
+one that matters for memory, and it is why a format the allowlist does not name costs nothing
+at all — the shipped list is JPEG, PNG, WebP, GIF and AVIF, of which only GIF and WebP are
+multi-frame, and both are counted correctly. (AVIF can carry an image sequence, but ImageMagick
+decodes only its primary item: measured at 35 MB for a 100-frame 1920×1080 AVIF.)
 
-If you run the `imagick` driver — especially if you extend `allowed_mime_types` beyond this
-package's default, which excludes TIFF and every other multi-page/multi-frame format besides
-GIF and WebP — set a hard ceiling on the decoder itself. It is the only structurally complete
-defence available, because it caps the decoder directly instead of predicting its cost from
-bytes:
+The residual risk is therefore specifically **a multi-frame container you add to
+`allowed_mime_types` yourself**, since the frame counter will read it as one frame. Nothing else
+in the stack will save you there. `max_file_size` bounds compressed bytes, not decode cost. Nor
+does PHP's `memory_limit` reliably: it provides some backstop under `gd` (an allocation large
+enough to exceed a finite `memory_limit` fails the request), but it does **not** bound `imagick`
+at all — ImageMagick allocates its pixel buffers natively, outside PHP's memory manager.
+Measured in this package's own test environment with `memory_limit` effectively unlimited: a
+1.4 MB, 100-page LZW TIFF fed through the `imagick` driver allocated roughly 3 GB before the
+post-decode check rejected it. With the pre-decode check in front of it, the same file costs
+0 MB — but only because `image/tiff` is not on the list. Put it on the list and the 3 GB is
+yours.
+
+So if you run the `imagick` driver and extend `allowed_mime_types` beyond the shipped set, also
+set a hard ceiling on the decoder itself. It is the only structurally complete defence, because
+it caps the decoder directly instead of predicting its cost from bytes:
 
 ```php
 Imagick::setResourceLimit(Imagick::RESOURCETYPE_MEMORY, 256 * 1024 * 1024);
