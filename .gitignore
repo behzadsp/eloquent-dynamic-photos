@@ -3,3 +3,5 @@ vendor
 .idea
 .superpowers
 .phpunit.cache
+docs/superpowers
+.claude
