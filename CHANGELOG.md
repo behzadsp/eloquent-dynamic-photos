@@ -3,7 +3,7 @@
 All notable changes to `eloquent-dynamic-photos` will be documented in this file, in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-## 2.0.0
+## 2.0.0 - 2026-08-19
 
 ### Added
 

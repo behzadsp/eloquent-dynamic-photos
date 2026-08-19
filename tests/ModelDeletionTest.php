@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Behzadsp\EloquentDynamicPhotos\Exceptions\PhotoDefinitionException;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Fixtures;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\Post;
 use Behzadsp\EloquentDynamicPhotos\Tests\Support\SoftPost;
@@ -117,6 +118,27 @@ it('coerces an env()-shaped config value the same as every other boolean flag', 
     'bool true' => [true, true],
     'bool false' => [false, false],
 ]);
+
+it('reports a config value it cannot read as a boolean, rather than silently skipping', function (): void {
+    // The realistic trigger is env('PHOTO_DELETE_FILES_ON_MODEL_DELETE') with no
+    // default, which returns null. Before the flag went through configBool() an
+    // unreadable value meant a silent "off"; now it is a loud misconfiguration,
+    // consistent with how every other config key in this package behaves.
+    //
+    // The row is already gone by the time this surfaces, because the listener
+    // runs on `deleted` — so the state left behind is a deleted row with its
+    // files untouched, which is consistent rather than a dead pointer.
+    config()->set('eloquent_photo.delete_files_on_model_delete', null);
+
+    $post = Post::create(['slug' => 'a']);
+    $post->updatePhoto(Fixtures::png(), 'photo');
+    $primary = deletedPrimaryPath($post);
+
+    expect(fn () => $post->delete())->toThrow(PhotoDefinitionException::class);
+
+    expect(Post::query()->find($post->getKey()))->toBeNull();
+    Storage::disk('photos')->assertExists($primary);
+});
 
 it('does not fall over deleting a model with no photos stored', function (): void {
     Post::create(['slug' => 'a'])->delete();

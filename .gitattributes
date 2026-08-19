@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+# Keep development-only files out of dist archives, so `composer require`
+# downloads the package rather than the project around it.
+/.github            export-ignore
+/tests              export-ignore
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/phpunit.xml        export-ignore
+/phpstan.neon       export-ignore
+/pint.json          export-ignore
