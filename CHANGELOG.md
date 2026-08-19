@@ -38,15 +38,18 @@ All notable changes to `eloquent-dynamic-photos` will be documented in this file
   throwing) — for both the primary and every conversion.
 - A real test suite: pest + orchestra/testbench, real encoded image fixtures, `Storage::fake()`
   for filesystem assertions. `composer test`, `composer test:coverage`, `composer lint`, and
-  `composer analyse` scripts. A GitHub Actions CI matrix (PHP 8.3–8.5 × Laravel 11–13).
+  `composer analyse` scripts. A GitHub Actions CI matrix (PHP 8.3–8.5 × Laravel 12–13).
   larastan at level max, zero suppressions in `src/`.
 - The config file moved to `config/eloquent_photo.php` and is published under the
   `eloquent-photo-config` tag.
 
 ### Changed
 
-- Raised the PHP floor to `^8.3`, narrowed Laravel support to `^11.0 || ^12.0 || ^13.0`, and
-  bumped `intervention/image` from `^2.7` (EOL) to `^4.2`.
+- Raised the PHP floor to `^8.3`, narrowed Laravel support to `^12.0 || ^13.0`, and bumped
+  `intervention/image` from `^2.7` (EOL) to `^4.2`. Laravel 11 is deliberately excluded: it is
+  past its security window, seven advisories against `laravel/framework` have no 11.x fix (they
+  land in 12.60.0/12.61.1/13.10.0), and Composer 2.10+ blocks the whole 11.x line by default —
+  so a supported-on-paper `^11.0` could not actually be installed.
 - Default `quality` raised from `50` to `75` — 50 was visibly lossy as a default. New uploads
   are larger and look better; existing stored files are unaffected.
 - Config key `root_directory` renamed to `directory`; `slug_limit` renamed to `name_limit`.
@@ -95,7 +98,7 @@ Each of the following was a defect in v1, each now has a named regression test:
   `Storage::put()` already creates intermediate directories — and the `exists()` check was
   unreliable on S3 besides. Removed.
 - `str()` requires Laravel 9, while `composer.json` claimed support for `^7.0|^8.0`. The
-  support matrix is now honest: `^11.0 || ^12.0 || ^13.0`.
+  support matrix is now honest: `^12.0 || ^13.0`.
 - `getEloquentPhotoQuality()` and `getEloquentPhotoSlugLimit()` were typed to return `string`
   but actually returned config integers, which then fed parameters expecting `int`. Replaced by
   typed, readonly `int` properties on `PhotoDefinition`.

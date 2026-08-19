@@ -15,7 +15,7 @@ Upgrading from v1? See [UPGRADE.md](UPGRADE.md) — the model-facing API changed
 | | |
 |---|---|
 | PHP | `^8.3` |
-| Laravel | `^11.0 \|\| ^12.0 \|\| ^13.0` |
+| Laravel | `^12.0 \|\| ^13.0` |
 | intervention/image | `^4.2` |
 
 No image extension is a hard requirement — the driver (`gd` or `imagick`) is chosen at
