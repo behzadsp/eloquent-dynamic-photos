@@ -19,7 +19,7 @@ declared at all).
 | config `quality: 50` | config `quality: 75` — 50 is visibly lossy as a default |
 | `$model->photo_url` | Unchanged in shape, but now only works for fields declared in `photoDefinitions()` |
 
-## The three changes most likely to break silently
+## The four changes most likely to break silently
 
 These won't necessarily throw or fail a test — they'll just produce the wrong value if you
 carry the v1 call site over unchanged.
@@ -41,6 +41,16 @@ carry the v1 call site over unchanged.
    look better than before. If you need byte-for-byte parity with v1's output, set
    `quality: 50` explicitly, either in `config/eloquent_photo.php` or per-field on
    `PhotoDefinition`. Existing files are untouched either way — this only affects new writes.
+
+4. **Your already-published config file keeps working, and that is the problem.** v1 and v2
+   publish to the same place (`config/eloquent_photo.php`), so upgrading does not replace it.
+   v2 merges its own defaults underneath yours, which means every key you never set picks up a
+   v2 default — but it also means a key that was *renamed* is now dead weight: a v1 file setting
+   `root_directory: 'uploads'` leaves `directory` unset, so new uploads go to the v2 default
+   (`images`) instead. Same for `slug_limit` → `name_limit`. Nothing errors; the files just land
+   somewhere else. Rename those two keys in your published file (or republish it with
+   `php artisan vendor:publish --tag="eloquent-photo-config" --force` and re-apply your values —
+   note the tag itself changed, v1 published under the generic `config` tag).
 
 ## Two more things to know before you upgrade
 
